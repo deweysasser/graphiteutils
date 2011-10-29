@@ -99,7 +99,7 @@ sub main {
 	    $log=\*STDIN;
 	}
 	else {
-	    my $cmd = "logtail2 -f $file -o $state/logtail.state";
+	    my $cmd = "/usr/sbin/logtail2 -f $file -o $state/logtail.state";
 	    &debug("$cmd");
 	    open($log, "$cmd|" ) || die("Failed to read from $file: $!");
 	}
