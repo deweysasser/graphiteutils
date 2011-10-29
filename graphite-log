@@ -1,0 +1,297 @@
+#!/usr/bin/perl
+
+# purpose:  parse log files (using logtail) for interesting lines.  
+
+
+use strict;
+use Getopt::Long;
+use vars qw (%Config);
+use Time::Local;
+use POSIX 'strftime';
+no strict 'refs';
+
+our %Months = (
+    "Jan" => 0,
+    "Feb" => 1,
+    "Mar" => 2,
+    "Apr" => 3,
+    "May" => 4,
+    "Jun" => 5,
+    "Jul" => 6,
+    "Aug" => 7,
+    "Sep" => 8,
+    "Oct" => 9,
+    "Nov" => 10,
+    "Dec" => 11,
+    );
+
+$Config{syntax}="syslog";
+$Config{currentYear}=&getCurrentYear();
+$Config{bucket}=60;
+$Config{prefix}="log";
+
+GetOptions(
+    "debug" => \$Config{debug},
+    "syntax=s" => \$Config{syntax},
+    "bucket=s" => \$Config{bucket},
+    "prefix=s" => \$Config{prefix},
+    "graphite-server=s" => \$Config{graphite},
+    "current-year=s" => \$Config{currentYear},
+    "file=s@" => \$Config{files},
+    );
+
+&main;
+
+sub main {
+
+    my $parser = "readfrom_$Config{syntax}";
+    my $graphite;
+
+    my $statedir;
+
+    # effective user ID is root
+    if($> eq 0) {
+	$statedir="/var/lib/graphite-log";
+    }
+    else {
+	$statedir=$ENV{HOME} . "/.graphite-log";
+    }
+
+    &debug("State dir is $statedir");
+    mkdir $statedir unless -d $statedir;
+
+    if($Config{graphite}) {
+	open($graphite, "|nc $Config{graphite} 2003") || die("Failed to netcat $Config{graphite}: $!");
+
+	select $graphite;
+    }
+
+    my @matchers = &parseMatchers(@ARGV);
+
+    my $keys = {};
+
+    foreach my $file (@{$Config{files}}) {
+	my ($date, $message, $bucket, $lastbucket);
+	my $counter;
+
+	my $state = $file;
+	$state =~ s/\//_/g;
+	$state = "$statedir/$state";
+	mkdir $state unless -d $state;
+	&debug("State for $file is $state");
+
+	($bucket, $keys) = &readState($state);
+
+	my $cmd = "logtail2 -f $file -o $state/logtail.state";
+	&debug("$cmd");
+        open(my $log, "$cmd|" ) || die("Failed to read from $file: $!");
+
+	do {
+	    ($date, $message) = &$parser($log);
+
+	    $bucket = int($date/$Config{bucket});
+
+	    if($lastbucket != $bucket && $lastbucket > 0) {
+		&catchup($lastbucket, $bucket, $keys);
+		&dump($counter, $lastbucket*$Config{bucket}, $keys);
+		$counter={};
+	    }
+
+	    $lastbucket = $bucket;
+
+	    if($date) {
+		$counter->{"lines"}++;
+		foreach my $matcher (@matchers) {
+		    my $re =  $matcher->{re};
+
+#		    &debug("Checking $message against /$re/");
+		    $_ = $message;
+		    if(/$re/) {
+			my $key = $matcher->key;
+			$keys->{$key}=1;
+			$counter->{$key}++;
+		    }
+		}
+	    }
+	} while ($date);
+	&recordState($state, $bucket, $keys);
+    }
+
+    select STDOUT;
+    close $graphite if $graphite;
+}
+
+sub readState {
+    my $dir = shift;
+    my $file = "$dir/log.state";
+
+    return unless -f $file;
+
+    open(my $fh, $file) || die("Failed to read $file: $!");
+
+    my $bucket = <$fh>;
+
+    return unless $bucket;
+    chop $bucket;
+
+    my $keys;
+
+    while(<$fh>) {
+	chop;
+	$keys->{$_}=0;
+    }
+    
+    close $fh;
+
+    return ($bucket, $keys);
+}
+
+sub recordState {
+    my $statefile = shift;
+    my $bucket = shift;
+    my $keys = shift;
+
+    my $file = "$statefile/log.state";
+
+    open(my $fh, ">$file") || die("Failed to record state to $file: $!");
+
+    print $fh "$bucket\n";
+    foreach my $key (keys %$keys) {
+	print $fh "$key\n";
+    }
+
+    close $fh;
+}
+
+sub catchup {
+    my $last = shift;
+    my $this = shift;
+    my $keys = shift;
+
+    return unless $keys;
+
+    for(my $bucket = $last; $bucket<$this; $bucket++) {
+	foreach my $key (keys %$keys) {
+	    my $date = $bucket*$Config{bucket};
+	    &write($key, 0, $date);
+	}
+    }
+}
+
+sub parseMatchers {
+    my @matchers;
+
+    foreach my $arg (@_) {
+	push(@matchers, new Matcher($arg));
+    }
+
+    return @matchers;
+}
+
+sub dump {
+    my $counter = shift;
+    my $date = shift;
+    my $keys = shift;
+
+    foreach my $key (keys %$keys) {
+	$counter->{$key} = 0 unless 	$counter->{$key};
+    }
+
+    foreach my $key (keys %$counter) {
+	my $metric = "$Config{prefix}.$key";
+	my $value = $counter->{$key};
+	print "$metric $value $date\n";
+    }
+}
+
+sub write {
+    my $prefix = $Config{prefix};
+    my $key = shift;
+    my $value = shift;
+    my $date = shift;
+
+    $value = 1 unless defined($value);
+
+    print "$prefix.$key $value $date\n";
+}
+
+
+sub readfrom_syslog {
+    my $fh = shift;
+
+    my $line;
+    return undef unless ($line = <$fh>);
+    chop $line;
+
+    my ($month, $mday, $hour, $min, $sec, $message) = split(/[ :]/,$line, 6);
+
+    my $mon = $Months{$month};
+    my $year = $Config{currentYear}-1900;
+
+    die("Failed to interpret $month as month") unless defined($mon);
+
+    my $now = strftime("%s", $sec, $min, $hour, $mday, $Months{$month}, $year);
+
+    return ($now, $message);
+}
+
+sub getCurrentYear {
+    my  ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime();
+
+    return $year+ 1900;
+}
+
+sub debug {
+    return unless $Config{debug};
+
+    if($Config{graphite}) {
+	print STDERR "@_\n";
+    }
+    else {
+	print STDOUT "@_\n";
+    }
+}
+
+package Matcher;
+
+sub new {
+    my $self = {};
+    my $class = shift;
+    my $line = shift;
+
+    bless $self, $class;
+
+    my ($key, $re);
+
+    if($line =~ /=/) {
+	($key, $re) = split(/=/, $line);
+    } else {
+	$key = $re = $line;
+    }
+
+    $self->{key}=$key;
+    $self->{re}=$re;
+
+    return $self;
+}
+
+
+sub key {
+    my $self = shift;
+    my $key = $self->{key};
+
+    my %bound;
+
+    $bound{1}=$1;
+    $bound{2}=$2;
+    $bound{3}=$3;
+
+    return $key unless $key =~ /\$/;
+
+    $key =~ s/\$([0-9])/$bound{$1}/;
+
+    print "key now $key\n";
+
+    return $key;
+}
+
