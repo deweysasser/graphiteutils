@@ -30,7 +30,7 @@ $Config{currentYear}=&getCurrentYear();
 $Config{bucket}=60;
 $Config{prefix}="log";
 
-GetOptions(
+unless(GetOptions(
     "debug" => \$Config{debug},
     "syntax=s" => \$Config{syntax},
     "bucket=s" => \$Config{bucket},
@@ -38,7 +38,10 @@ GetOptions(
     "graphite-server=s" => \$Config{graphite},
     "current-year=s" => \$Config{currentYear},
     "file=s@" => \$Config{files},
-    );
+       )) {
+    print STDERR "Invalid usage\n";
+    exit 1;
+}
 
 &main;
 
@@ -61,7 +64,7 @@ sub main {
     mkdir $statedir unless -d $statedir;
 
     if($Config{graphite}) {
-	open($graphite, "|nc $Config{graphite} 2003") || die("Failed to netcat $Config{graphite}: $!");
+	open($graphite, "|nc -q 2 $Config{graphite} 2003") || die("Failed to netcat $Config{graphite}: $!");
 
 	select $graphite;
     }
@@ -71,8 +74,14 @@ sub main {
     my $keys = {};
 
     foreach my $file (@{$Config{files}}) {
+	&debug("Starting $file");
 	my ($date, $message, $bucket, $lastbucket);
 	my $counter;
+
+	my $filekey = $file;
+	$filekey =~ s/[^a-zA-Z0-9_]/_/g;
+
+	die("Failed to translate $file into usable key") unless $filekey;
 
 	my $state = $file;
 	$state =~ s/\//_/g;
@@ -92,15 +101,15 @@ sub main {
 	    $bucket = int($date/$Config{bucket});
 
 	    if($lastbucket != $bucket && $lastbucket > 0) {
-		&catchup($lastbucket, $bucket, $keys);
 		&dump($counter, $lastbucket*$Config{bucket}, $keys);
+		&catchup($lastbucket, $bucket, $keys);
 		$counter={};
 	    }
 
 	    $lastbucket = $bucket;
 
 	    if($date) {
-		$counter->{"lines"}++;
+		$counter->{"log.$filekey.lines"}++;
 		foreach my $matcher (@matchers) {
 		    my $re =  $matcher->{re};
 
@@ -114,11 +123,16 @@ sub main {
 		}
 	    }
 	} while ($date);
+	close $log;
 	&recordState($state, $bucket, $keys);
+	&debug("Done with $file");
     }
 
-    select STDOUT;
+    &debug("Done with all files");
     close $graphite if $graphite;
+    &debug("Connection to graphite closed");
+    exit 0;
+    &debug("Why are we still here after exit?");
 }
 
 sub readState {
@@ -170,7 +184,14 @@ sub catchup {
 
     return unless $keys;
 
-    for(my $bucket = $last; $bucket<$this; $bucket++) {
+    if($Config{debug}) {
+	my $lasttime = ($last+1)*$Config{bucket};
+	my $thistime = $this*$Config{bucket};
+
+	&debug("Catching up from $lasttime to $thistime");
+    }
+
+    for(my $bucket = $last+1; $bucket<$this; $bucket++) {
 	foreach my $key (keys %$keys) {
 	    my $date = $bucket*$Config{bucket};
 	    &write($key, 0, $date);
@@ -192,6 +213,8 @@ sub dump {
     my $counter = shift;
     my $date = shift;
     my $keys = shift;
+
+    &debug("Dumping for $date");
 
     foreach my $key (keys %$keys) {
 	$counter->{$key} = 0 unless 	$counter->{$key};
