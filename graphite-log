@@ -2,6 +2,7 @@
 
 # purpose:  parse log files (using logtail) for interesting lines.  
 
+# TODO:  Make this read files from stdin as well
 
 use strict;
 use Getopt::Long;
@@ -78,10 +79,11 @@ sub main {
 	my ($date, $message, $bucket, $lastbucket);
 	my $counter;
 
-	my $filekey = $file;
-	$filekey =~ s/[^a-zA-Z0-9_]/_/g;
-
-	die("Failed to translate $file into usable key") unless $filekey;
+	my $filekey;
+	unless($file eq "-") {
+	    $filekey = $file;
+	    $filekey =~ s/[^a-zA-Z0-9_]/_/g;
+	}
 
 	my $state = $file;
 	$state =~ s/\//_/g;
@@ -91,9 +93,16 @@ sub main {
 
 	($bucket, $keys) = &readState($state);
 
-	my $cmd = "logtail2 -f $file -o $state/logtail.state";
-	&debug("$cmd");
-        open(my $log, "$cmd|" ) || die("Failed to read from $file: $!");
+	my $log;
+
+	if ($file eq "-") {
+	    $log=\*STDIN;
+	}
+	else {
+	    my $cmd = "logtail2 -f $file -o $state/logtail.state";
+	    &debug("$cmd");
+	    open($log, "$cmd|" ) || die("Failed to read from $file: $!");
+	}
 
 	do {
 	    ($date, $message) = &$parser($log);
@@ -109,7 +118,7 @@ sub main {
 	    $lastbucket = $bucket;
 
 	    if($date) {
-		$counter->{"log.$filekey.lines"}++;
+		$counter->{"log.$filekey.lines"}++ if $filekey;
 		foreach my $matcher (@matchers) {
 		    my $re =  $matcher->{re};
 
