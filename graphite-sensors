@@ -37,17 +37,28 @@ sub main {
     }
 
     my $adapter;
+    my $module;
+    my $errors;
+
     while(<$sensors>) {
 	chop;
+	if(/^[a-zA-Z0-9-]+$/) {
+	    $module = $&;
+	}
 	if(/Adapter: (.*)/) {
 	    $adapter = $1;
+	}
+
+	if(/ERROR:/) {
+	    $errors++;
+	    next;
 	}
 
 	if(/\s*([^:]+)+:\s*\+?([\d\.]+)/) {
 	    my $key = $1;
 	    my $value = $2;
 
-	    &write("$adapter.$key.level", $value, $now);
+	    &write("$module.$key.level", $value, $now);
 	}
     }
 
