@@ -2,7 +2,11 @@
 
 # purpose:  parse log files (using logtail) for interesting lines.  
 
-# TODO:  Make this read files from stdin as well
+# TODO:  
+#   * test fail2ban logs
+#   * debug exim logs
+#   * Apache logs
+#   * Snort logs
 
 use strict;
 use Getopt::Long;
@@ -247,6 +251,33 @@ sub write {
     print "$prefix.$key $value $date\n";
 }
 
+# 2011-10-29 07:13:13 1RK6qa-0001Gm-EV Completed
+sub readfrom_exim {
+    my $fh = shift;
+
+    return unless ($_ = <$fh>);
+
+    my ($year, $month, $mday, $hour, $min, $sec, $millis, $message) = split(/[-: ]+/, 8);
+
+    my $now = strftime("%s", $sec, $min, $hour, $mday, $month-1, $year-1900);
+
+    return ($now, $message);
+}
+
+# 2011-10-23 06:27:19,861 fail2ban.filter : INFO   Log rotation detected for /var/log/auth.log
+sub readfrom_fail2ban {
+    my $fh = shift;
+
+    return unless ($_ = <$fh>);
+
+    my ($year, $month, $mday, $hour, $min, $sec, $millis, $message) = split(/[-: ,]+/, 8);
+
+    my $now = strftime("%s", $sec, $min, $hour, $mday, $month-1, $year-1900);
+
+    return ($now, $message);
+}
+
+# Nov  2 21:14:56 johnlittle rsyslogd: [origin software="rsyslogd" swVersion="4.2.0" x-pid="1628" x-info="http://www.rsyslog.com"] rsyslogd was HUPed, type 'lightweight'.
 
 sub readfrom_syslog {
     my $fh = shift;
@@ -255,14 +286,16 @@ sub readfrom_syslog {
     return undef unless ($line = <$fh>);
     chop $line;
 
-    my ($month, $mday, $hour, $min, $sec, $message) = split(/[ :]/,$line, 6);
+    my ($month, $mday, $hour, $min, $sec, $message) = split(/[ :]+/,$line, 6);
 
     my $mon = $Months{$month};
     my $year = $Config{currentYear}-1900;
 
     die("Failed to interpret $month as month") unless defined($mon);
 
-    my $now = strftime("%s", $sec, $min, $hour, $mday, $Months{$month}, $year);
+    my $now = strftime("%s", $sec, $min, $hour, $mday, $mon, $year);
+
+    &debug("Converting $sec $min $hour $mday $mon $year to $now");
 
     return ($now, $message);
 }
@@ -296,7 +329,7 @@ sub new {
     my ($key, $re);
 
     if($line =~ /=/) {
-	($key, $re) = split(/=/, $line);
+	($key, $re) = split(/=/, $line, 2);
     } else {
 	$key = $re = $line;
     }
