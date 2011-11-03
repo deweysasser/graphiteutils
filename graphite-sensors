@@ -22,7 +22,14 @@ unless(GetOptions(
 &main;
 
 sub main {
-    open(my $sensors, "sensors 2>/dev/null |") || die("Failed to run sensors: $!");
+    my $graphite;
+    if($Config{graphite}) {
+        open($graphite, "|nc $Config{graphite} 2003") || die("Failed to netcat to $Config{graphite}: $!");
+	select $graphite; 
+    }
+
+
+    open(my $sensors, "sensors |") || die("Failed to run sensors: $!");
 
     my $now = strftime("%s", localtime);
 
@@ -30,11 +37,6 @@ sub main {
 	$Config{prefix} = "system." . hostname . ".sensors" 
     }
 
-    my $graphite;
-    if($Config{graphite}) {
-        open($graphite, "|nc $Config{graphite} 2003") || die("Failed to netcat to $Config{graphite}: $!");
-	select $graphite; 
-    }
 
     my $adapter;
     my $module;
