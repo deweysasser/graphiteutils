@@ -22,7 +22,7 @@ unless(GetOptions(
 &main;
 
 sub main {
-    open(my $sensors, "sensors|") || die("Failed to run sensors: $!");
+    open(my $sensors, "sensors 2>/dev/null |") || die("Failed to run sensors: $!");
 
     my $now = strftime("%s", localtime);
 
