@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Purpose:  Log exim stats
+
+host=`hostname`
+now=`date +%s`
+
+( 
+  echo "system.$host.mail.queue.level `/usr/sbin/exim -bpc` $now"
+) | nc graphite 2003
