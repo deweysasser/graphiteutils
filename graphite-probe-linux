@@ -9,20 +9,22 @@ use Getopt::Long;
 use strict;
 use vars '%Config', '@Columns';
 use POSIX 'strftime';
+use Sys::Hostname;
 
 $Config{date}=strftime("%s", localtime);
 
 
 unless(GetOptions(
-	   "key=s"  => \$Config{key},
+	   "prefix=s"  => \$Config{prefix},
 	   "column=s@" => \@Columns,
 	   "graphite-host=s" => \$Config{graphiteHost},
        )) {
     die("Failed to parse options");
 }
 
-die("-key required") unless ($Config{key});
-
+unless(defined $Config{prefix}) {
+    $Config{prefix} = "system." . hostname ;
+}
 
 
 &main;
@@ -172,5 +174,5 @@ sub write {
     my $value = shift;
     $value = 0 unless $value;
 
-    print "$Config{key}.$subkey $value $Config{date}\n";
+    print "$Config{prefix}.$subkey $value $Config{date}\n";
 }
