@@ -1,0 +1,7 @@
+#!/bin/bash
+
+dir=/var/lib/graphite/probes
+
+for probe in $dir/graphite-probe*; do
+  $probe -graphite graphite
+done
