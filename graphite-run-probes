@@ -2,6 +2,24 @@
 
 dir=/var/lib/graphite/probes
 
+while [ -n "$*" ] ; do
+  case $1 in 
+    -prefix) prefix="$2"; shift;;
+    -grahpite) graphite="$2"; shift;;
+    -*) echo "Unknown option $1"; exit 1;;
+    *) echo "Unknown argument $1"; exit 2;;
+  esac    
+  shift
+done
+
+if [ -z "$prefix" ] ; then
+    prefix="system.`hostname`"
+fi
+
+if [ -z "$graphite" ] ; then
+    graphite="graphite"
+fi
+
 for probe in $dir/graphite-probe*; do
-  $probe -graphite graphite
+  $probe  -prefix $prefix -graphite $graphite
 done
