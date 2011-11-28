@@ -1,0 +1,176 @@
+#!/usr/bin/perl
+
+# Purpose: collect various system stats and report them to graphite
+#  We're not using one of the myriad of tools available for this
+#  purpose because they all seem to handle LVM block devices poorly.
+
+use Time::Local;
+use Getopt::Long; 
+use strict;
+use vars '%Config', '@Columns';
+use POSIX 'strftime';
+
+$Config{date}=strftime("%s", localtime);
+
+
+unless(GetOptions(
+	   "key=s"  => \$Config{key},
+	   "column=s@" => \@Columns,
+	   "graphite-host=s" => \$Config{graphiteHost},
+       )) {
+    die("Failed to parse options");
+}
+
+die("-key required") unless ($Config{key});
+
+
+
+&main;
+
+sub main {
+
+    my $graphite;
+
+    if($Config{graphiteHost}) {
+	my ($host, $port) = split(/:/, $Config{graphiteHost});
+	$port = 2003 unless $port;
+	open($graphite, "|nc $host $port") || die("Failed to netcat to $host:$port: $!");
+	select $graphite;
+    }
+
+
+    &cpu;
+    &load;
+    &disk;
+    &network;
+
+
+    close($graphite) if $graphite;
+}
+
+# cat /proc/net/dev
+#Inter-|   Receive                                                |  Transmit
+# face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+#  lo:709708566 2367582    0    0    0     0          0         0 709708566 2367582    0    0    0     0       0          0
+#  eth0:3874460054 88403338 6793 7034    0     0          0         0 1638409025 11341491    0    0    0     0       0          0
+
+sub network {
+    my $fd;
+
+    open($fd, "/proc/net/dev") || die("Failed to read /proc/net/dev: $!");
+
+    <$fd>; # throw away first line
+    <$fd>; # throw away main header line
+
+    while(<$fd>) 
+    {
+	chop;
+	s/^\s+//;
+	my ($iface, 
+	    $rx_bytes, $rx_packets, $rx_errs, $rx_drop, $rx_fifo, $rx_frame, $rx_compressed, $rx_multicast, 
+	    $tx_bytes, $tx_packets, $tx_errs, $tx_drop, $tx_fifo, $tx_frame, $tx_compressed, $tx_multicast) = split(/[\s:]+/, $_);
+
+	die("Failed to read interface") unless $iface;
+
+	next if $iface eq "lo";
+	next unless $iface =~ /^eth/;
+	&write("network.$iface.receive.byte_count", $rx_bytes);
+	&write("network.$iface.receive.packet_count", $rx_packets);
+#	&write("network.$iface.receive.packet-errors", $rx_errs);
+#	&write("network.$iface.receive.packets-dropped", $rx_drop);
+	&write("network.$iface.transmit.byte_count", $tx_bytes);
+	&write("network.$iface.transmit.packet_count", $tx_packets);
+#	&write("network.$iface.transmit.packet-errors", $tx_errs);
+#	&write("network.$iface.transmit.packets-dropped", $tx_drop);
+    }
+
+    close($fd);
+}
+
+sub disk { 
+    open(my $file, "/proc/diskstats") || return 0;
+
+    my (
+	    $tot_reads, $tot_readsmerged, $tot_readsectors, $tot_readtime, 
+	    $tot_writes, $tot_writemerged, $tot_writesectors, $tot_writetime,
+	    $tot_outstanding, $tot_iotime, $tot_weighted) = split(/\s+/);
+
+    while(<$file>) {
+	# trim leading whitespace
+	$_ =~ s/^\s*//;
+	my ($major, $minor, $name, 
+	    $reads, $readsmerged, $readsectors, $readtime, 
+	    $writes, $writemerged, $writesectors, $writetime,
+	    $outstanding, $iotime, $weighted) = split(/\s+/);
+	next unless $name =~ /^sd[a-z]$/;
+
+	$tot_reads+=$reads;
+	$tot_readsmerged+=$readsmerged;
+	$tot_readsectors+=$readsectors;
+	$tot_readtime+=$readtime;
+	$tot_writes+=$writes;
+	$tot_writemerged+=$writemerged;
+	$tot_writesectors+=$writesectors;
+	$tot_writetime+=$writetime;
+	$tot_outstanding+=$outstanding;
+	$tot_iotime+=$iotime;
+	$tot_weighted+=$weighted;
+
+
+    }
+
+	&write("disk.all.read.op_count", $tot_reads);
+	&write("disk.all.read.merged_op_count", $tot_readsmerged);
+
+	&write("disk.all.write.op_count", $tot_writes);
+	&write("disk.all.write.merged_op_count", $tot_writemerged);
+
+	&write("disk.all.read.byte_count", $tot_readsectors*512);
+	&write("disk.all.write.byte_count", $tot_writesectors*512);
+
+	&write("disk.all.queuesize", $tot_outstanding);
+
+    close $file;
+}
+
+
+sub cpu {
+    open(my $cpu, "/proc/stat") || return 0;
+    my $cpuCount;
+
+    my ($endText, $endUser, $endNice, $endSystem, $endIdle, $endIowait, $endIrq, $endSoftirq);
+
+    while(<$cpu>) {
+	$cpuCount++ if /^cpu\d/;
+	if(/^cpu /) {
+	($endText, $endUser, $endNice, $endSystem, $endIdle, $endIowait, $endIrq, $endSoftirq) = split(/\s+/);
+	}
+    }
+
+    close $cpu;
+
+    &write("cpu.time.user_seconds_count", ($endUser)/$cpuCount/100);
+    &write("cpu.time.system_seconds_count", ($endSystem)/$cpuCount/100);
+    &write("cpu.time.iowait_seconds_count", ($endIowait)/$cpuCount/100);
+
+}
+
+sub load {
+    open(my $loadavg, "/proc/loadavg") || return 0;
+    while(<$loadavg>) {
+	chop;
+	my ($min1, $min5, $min15, $ready, $total, $last) = split(/[\s\/]+/);
+	&write("cpu.load_average.1_minute", $min1);
+#	&write("cpu.load_average.5_minute", $min5);
+    }
+
+    close $loadavg;
+}
+
+sub write {
+    my $subkey = shift;
+    my $value = shift;
+    $value = 0 unless $value;
+
+    print "$Config{key}.$subkey $value $Config{date}\n";
+}
