@@ -8,7 +8,6 @@ use Getopt::Long;
 
 use vars '%Config';
 
-$Config{info}="/etc/edialog.conf";
 $Config{stats}="/proc/net/rpc/nfsd";
 $Config{prefix}="development.storage";
 
@@ -30,7 +29,7 @@ sub main {
 
     my $prefix="$Config{prefix}.$machine.nfsd";
 
-    open(my $input, $Config{stats}) || die("Failed to read $Config{info}: $!");
+    open(my $input, $Config{stats}) || die("Failed to read $Config{stats}: $!");
 
     while(<$input>) {
 	chop;
