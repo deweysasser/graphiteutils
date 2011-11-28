@@ -5,18 +5,22 @@
 use POSIX 'strftime';
 use strict;
 use Getopt::Long;
+use Sys::Hostname;
 
 use vars '%Config';
 
 $Config{stats}="/proc/net/rpc/nfsd";
-$Config{prefix}="development.storage";
 
 unless(&GetOptions(
-		   "show" => \$Config{show},
+		   "graphite" => \$Config{graphite},
 		   "prefix=s" => \$Config{prefix},
 		   )) {
     
     die("Bad options");
+}
+
+unless(defined $Config{prefix}) {
+    $Config{prefix} = "system." . hostname ;
 }
 
 &main;
@@ -24,34 +28,29 @@ unless(&GetOptions(
 sub main {
     my $stats={};
 
-    my $machine = `hostname`;
-    chop $machine;
-
-    my $prefix="$Config{prefix}.$machine.nfsd";
-
     open(my $input, $Config{stats}) || die("Failed to read $Config{stats}: $!");
 
     while(<$input>) {
 	chop;
 #	&debug("read line [$_]");
 	if(/^rc/) {
-	    &handleReadCache($stats,$prefix, $_);
+	    &handleReadCache($stats, $_);
 	    next;
 	}
 	if(/^io/) {
-	    &handleIOLine($stats, $prefix, $_);
+	    &handleIOLine($stats,  $_);
 	    next;
 	}
 	if(/^fh/) {
-	    &handleFH($stats, $prefix, $_);
+	    &handleFH($stats,  $_);
 	    next;
 	}
 	if(/^th/) {
-	    &handleTH($stats, $prefix, $_);
+	    &handleTH($stats,  $_);
 	    next;
 	}
 	if(/^ra/) {
-	    &handleRA($stats, $prefix, $_);
+	    &handleRA($stats,  $_);
 	    next;
 	}
     }
@@ -60,20 +59,22 @@ sub main {
 
     my $now = strftime("%s", localtime());
 
-    my $out;
+    my $graphite;
 
-    unless($Config{show}) {
-	open($out, "| nc graphite 2003") || die("Failed to write to netcat: $!");
-	select $out;
+    if($Config{graphite}) {
+	my ($host, $port) = split(/:/, $Config{graphite});
+	$port = 2003 unless $port;
+	open($graphite, "| nc $host $port") || die("Failed to write to netcat $host:$port : $!");
+	select $graphite;
     }
 
     foreach my $key (keys %$stats) {
-	print "$key ", $stats->{$key}, " $now\n";
+	print "$Config{prefix}.nfsd.$key ", $stats->{$key}, " $now\n";
     }
 
-    unless($Config{show}) {
+    if($graphite) {
 	select STDOUT;
-	close $out;
+	close $graphite;
     }
 }
 
@@ -83,80 +84,75 @@ sub debug {
 
 sub handleTH {
     my $stats=shift;
-    my $prefix = shift;
     my $line = shift;
     my ($discard, $threads, $maxedCount, $hist10, $hist20, $hist30, $hist40, $hist50, $hist60, $hist70, $hist80, $hist90, $hist100) = 
 	split(/\s+/, $line);
 
-    $stats->{"$prefix.threads.count"}=$threads;
-    $stats->{"$prefix.threads.fully_utilized_count"}=$maxedCount;
-    $stats->{"$prefix.threads.used.histo_010"}=$hist10;
-    $stats->{"$prefix.threads.used.histo_020"}=$hist20;
-    $stats->{"$prefix.threads.used.histo_030"}=$hist30;
-    $stats->{"$prefix.threads.used.histo_040"}=$hist40;
-    $stats->{"$prefix.threads.used.histo_050"}=$hist50;
-    $stats->{"$prefix.threads.used.histo_060"}=$hist60;
-    $stats->{"$prefix.threads.used.histo_070"}=$hist70;
-    $stats->{"$prefix.threads.used.histo_080"}=$hist80;
-    $stats->{"$prefix.threads.used.histo_090"}=$hist90;
-    $stats->{"$prefix.threads.used.histo_100"}=$hist100;
+    $stats->{"threads.count"}=$threads;
+    $stats->{"threads.fully_utilized_count"}=$maxedCount;
+    $stats->{"threads.used.histo_010"}=$hist10;
+    $stats->{"threads.used.histo_020"}=$hist20;
+    $stats->{"threads.used.histo_030"}=$hist30;
+    $stats->{"threads.used.histo_040"}=$hist40;
+    $stats->{"threads.used.histo_050"}=$hist50;
+    $stats->{"threads.used.histo_060"}=$hist60;
+    $stats->{"threads.used.histo_070"}=$hist70;
+    $stats->{"threads.used.histo_080"}=$hist80;
+    $stats->{"threads.used.histo_090"}=$hist90;
+    $stats->{"threads.used.histo_100"}=$hist100;
 }
 
 sub handleIOLine {
     my $stats=shift;
-    my $prefix = shift;
     my $line = shift;
     my ($discard, $read, $written) = split(/\s+/, $line);
 
-    $stats->{"$prefix.io.read"}=$read;
-    $stats->{"$prefix.io.write"}=$written;
+    $stats->{"io.read"}=$read;
+    $stats->{"io.write"}=$written;
 }
 
 sub handleFH {
     my $stats=shift;
-    my $prefix = shift;
     my $line = shift;
     my ($discard, $stale, $total, $anon, $dirCacheMiss, $nondirCacheMiss) = split(/\s+/, $line);
 
-    $stats->{"$prefix.file_handles.stale"}=$stale;
-    $stats->{"$prefix.file_handles.total"}=$total;
-    $stats->{"$prefix.file_handles.anonymous"}=$anon;
-    $stats->{"$prefix.file_handles.dir_cache_miss"}=$dirCacheMiss;
-    $stats->{"$prefix.file_handles.nondir_cache_miss"}=$nondirCacheMiss;
+    $stats->{"file_handles.stale"}=$stale;
+    $stats->{"file_handles.total"}=$total;
+    $stats->{"file_handles.anonymous"}=$anon;
+    $stats->{"file_handles.dir_cache_miss"}=$dirCacheMiss;
+    $stats->{"file_handles.nondir_cache_miss"}=$nondirCacheMiss;
 }
 
 
 sub handleReadCache {
     my $stats=shift;
-    my $prefix = shift;
     my $line = shift;
     my ($discard, $hits, $misses, $bypassed) = split(/\s+/, $line);
 
-    $stats->{"$prefix.read_cache.hits"}=$hits;
-    $stats->{"$prefix.read_cache.misses"}=$misses;
-    $stats->{"$prefix.read_cache.bypassed"}=$bypassed;
+    $stats->{"read_cache.hits"}=$hits;
+    $stats->{"read_cache.misses"}=$misses;
+    $stats->{"read_cache.bypassed"}=$bypassed;
 
 }
 
 sub handleRA {
     my $stats=shift;
-    my $prefix = shift;
     my $line = shift;
     my ($discard, $size, $hist10, $hist20, $hist30, $hist40, $hist50, $hist60, $hist70, $hist80, $hist90, $hist100, $miss) = 
 	split(/\s+/, $line);
 
-    $stats->{"$prefix.read_ahead.size"}=$size;
-    $stats->{"$prefix.read_ahead.found.histo_010"}=$hist10;
-    $stats->{"$prefix.read_ahead.found.histo_020"}=$hist20;
-    $stats->{"$prefix.read_ahead.found.histo_030"}=$hist30;
-    $stats->{"$prefix.read_ahead.found.histo_040"}=$hist40;
-    $stats->{"$prefix.read_ahead.found.histo_050"}=$hist50;
-    $stats->{"$prefix.read_ahead.found.histo_060"}=$hist60;
-    $stats->{"$prefix.read_ahead.found.histo_070"}=$hist70;
-    $stats->{"$prefix.read_ahead.found.histo_080"}=$hist80;
-    $stats->{"$prefix.read_ahead.found.histo_090"}=$hist90;
-    $stats->{"$prefix.read_ahead.found.histo_100"}=$hist100;
-    $stats->{"$prefix.read_ahead.missed"}=$miss;
+    $stats->{"read_ahead.size"}=$size;
+    $stats->{"read_ahead.found.histo_010"}=$hist10;
+    $stats->{"read_ahead.found.histo_020"}=$hist20;
+    $stats->{"read_ahead.found.histo_030"}=$hist30;
+    $stats->{"read_ahead.found.histo_040"}=$hist40;
+    $stats->{"read_ahead.found.histo_050"}=$hist50;
+    $stats->{"read_ahead.found.histo_060"}=$hist60;
+    $stats->{"read_ahead.found.histo_070"}=$hist70;
+    $stats->{"read_ahead.found.histo_080"}=$hist80;
+    $stats->{"read_ahead.found.histo_090"}=$hist90;
+    $stats->{"read_ahead.found.histo_100"}=$hist100;
+    $stats->{"read_ahead.missed"}=$miss;
 }
 
 sub readConfig {
