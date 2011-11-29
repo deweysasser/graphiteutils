@@ -7,7 +7,7 @@ use Time::Local;
 use Getopt::Long; 
 use strict;
 use vars '%Config', '@Columns';
-use POSIX 'strftime', '_SC_CLK_TCK';
+use POSIX 'strftime', 'sysconf';
 use Sys::Hostname;
 
 $Config{date}=strftime("%s", localtime);
@@ -78,14 +78,18 @@ sub cpu {
     my $name = shift;
     my $pid = shift;
 
+    return unless -r "/proc/$pid/stat";
     open(my $stat, "/proc/$pid/stat") || die("Failed to read stat for $pid: $!");
+
+    my $clocks = sysconf(POSIX::_SC_CLK_TCK);
+    print "# clocks are $clocks\n";
     while(<$stat>) {
 	chop;
 	my ($pidagain, $exe, $state, $ppid, $pgrp, $session, $tty_nr, $tpgid, $flags, $minflt, $cminflt, $majflt, $cmajflt, $utime, $stime, $cutime, $cstime, $pri) = split(/\s+/);
 
-	&write("vmware.vmx.cpu.$name.user.tick_count", $utime/_SC_CLK_TCK);
-	&write("vmware.vmx.cpu.$name.system.tick_count", $stime/_SC_CLK_TCK);
-	&write("vmware.vmx.cpu.$name.total_time.tick_count", ($utime + $stime + $cutime + $cstime)/_SC_CLK_TCK);
+	&write("vmware.vmx.cpu.$name.user.tick_count", $utime/$clocks);
+	&write("vmware.vmx.cpu.$name.system.tick_count", $stime/$clocks);
+	&write("vmware.vmx.cpu.$name.total_time.tick_count", ($utime + $stime + $cutime + $cstime)/$clocks);
     }
 
     close $stat;
@@ -95,6 +99,7 @@ sub cpu {
 sub io {
     my $name = shift;
     my $pid = shift;
+    return unless -r "/proc/$pid/io";
     open(my $io, "/proc/$pid/io") || die("Failed to read io for $pid: $!");
     while(<$io>) {
 	chop;
