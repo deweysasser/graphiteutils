@@ -83,9 +83,9 @@ sub cpu {
 	chop;
 	my ($pidagain, $exe, $state, $ppid, $pgrp, $session, $tty_nr, $tpgid, $flags, $minflt, $cminflt, $majflt, $cmajflt, $utime, $stime, $cutime, $cstime, $pri) = split(/\s+/);
 
-	&write("vmware.vmx.$name.user.tick_count", $utime/_SC_CLK_TCK);
-	&write("vmware.vmx.$name.system.tick_count", $stime/_SC_CLK_TCK);
-	&write("vmware.vmx.$name.total_time.tick_count", ($utime + $stime + $cutime + $cstime)/_SC_CLK_TCK);
+	&write("vmware.vmx.cpu.$name.user.tick_count", $utime/_SC_CLK_TCK);
+	&write("vmware.vmx.cpu.$name.system.tick_count", $stime/_SC_CLK_TCK);
+	&write("vmware.vmx.cpu.$name.total_time.tick_count", ($utime + $stime + $cutime + $cstime)/_SC_CLK_TCK);
     }
 
     close $stat;
@@ -101,7 +101,7 @@ sub io {
 	my ($field, $value) = split(/:\s+/);
 	my $label = $IOFieldMap{$field};
 	next unless $label;
-	&write("vmware.vmx.$name.$label",$value);
+	&write("vmware.vmx.io.$name.$label",$value);
     }
 
     close $io;
