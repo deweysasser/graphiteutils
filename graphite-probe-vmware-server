@@ -1,0 +1,128 @@
+#!/usr/bin/perl
+
+# purpose: analyze kernel debugging output to determine which VM is
+#  doing the IO
+
+use Time::Local;
+use Getopt::Long; 
+use strict;
+use vars '%Config', '@Columns';
+use POSIX 'strftime';
+use Sys::Hostname;
+
+$Config{date}=strftime("%s", localtime);
+
+
+unless(GetOptions(
+	   "prefix=s"  => \$Config{prefix},
+	   "column=s@" => \@Columns,
+	   "graphite-host=s" => \$Config{graphiteHost},
+       )) {
+    die("Failed to parse options");
+}
+
+unless(defined $Config{prefix}) {
+    $Config{prefix} = "system." . hostname ;
+}
+
+
+our %IOFieldMap = (
+#    "rchar" => "read_chars",
+#    "wchar" => "write_chars",
+    "syscr" => "read.call_count",
+    "syscw" => "write.call_count",
+    "read_bytes" => "read.byte_count",
+    "write_bytes" => "write.byte_count",
+    );
+    
+
+&main;
+
+sub main {
+    my $graphite;
+
+    if($Config{graphiteHost}) {
+	my ($host, $port) = split(/:/, $Config{graphiteHost});
+	$port = 2003 unless $port;
+	open($graphite, "|nc $host $port") || die("Failed to netcat to $host:$port: $!");
+	select $graphite;
+    }
+
+
+    open(my $ps, "ps -ef | grep vmware-vmx|") || die("ps failed: $!");
+
+    while(<$ps>) {
+	my ($user, $pid, $parent, $c, $stime, $tty, $time, $cmd) = split(/\s+/, $_, 8);
+	$cmd =~ /\s(\/.*\.vmx)/;
+	my $vmx = $1;
+
+	next unless $vmx;
+	my $name = &vmxToName($vmx);
+
+#	print "# pid $pid is vmx $vmx\n";
+
+	&io($name, $pid);
+	&cpu($name, $pid);
+
+    }
+
+    close $ps;
+
+    close($graphite) if $graphite;
+}
+
+# read /proc/$pid/stat for a line like
+# 18950 (vmware-vmx) S 1 18950 18950 0 -1 4202752 177447 1720 1106 1 95316 202333 3 0 20 0 8 0 223120114 884928512 81268 18446744073709551615 4194304 12498676 0 0 0 0 0 3149824 332001007 18446744073709551615 0 0 17 1 0 0 4765 0 0
+
+sub cpu {
+    my $name = shift;
+    my $pid = shift;
+
+    open(my $stat, "/proc/$pid/stat") || die("Failed to read stat for $pid: $!");
+    while(<$stat>) {
+	chop;
+	my ($pidagain, $exe, $state, $ppid, $pgrp, $session, $tty_nr, $tpgid, $flags, $minflt, $cminflt, $majflt, $cmajflt, $utime, $stime, $cutime, $cstime, $pri) = split(/\s+/);
+
+	&write("vmware.vmx.$name.user.tick_count", $utime);
+	&write("vmware.vmx.$name.system.tick_count", $stime);
+	&write("vmware.vmx.$name.total_time.tick_count", $utime + $stime + $cutime + $cstime);
+    }
+
+    close $stat;
+
+}
+
+sub io {
+    my $name = shift;
+    my $pid = shift;
+    open(my $io, "/proc/$pid/io") || die("Failed to read io for $pid: $!");
+    while(<$io>) {
+	chop;
+	my ($field, $value) = split(/:\s+/);
+	my $label = $IOFieldMap{$field};
+	next unless $label;
+	&write("vmware.vmx.$name.$label",$value);
+    }
+
+    close $io;
+
+}
+
+sub vmxToName {
+    my $path = shift;
+
+    $path =~ s/\.vmx$//;
+    $path =~ s/\//_/g;
+    $path =~ s/[^a-zA-Z0-9]/_/g;
+
+    return $path;
+}
+
+
+sub write {
+    my $subkey = shift;
+    my $value = shift;
+    $value = 0 unless $value;
+
+    print "$Config{prefix}.$subkey $value $Config{date}\n";
+}
