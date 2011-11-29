@@ -14,6 +14,7 @@ use vars qw (%Config);
 use Time::Local;
 use POSIX 'strftime';
 no strict 'refs';
+use Sys::Hostname;
 
 our %Months = (
     "Jan" => 0,
@@ -33,7 +34,7 @@ our %Months = (
 $Config{syntax}="syslog";
 $Config{currentYear}=&getCurrentYear();
 $Config{bucket}=60;
-$Config{prefix}="log";
+$Config{prefix}="system." . hostname;
 
 unless(GetOptions(
     "debug" => \$Config{debug},
@@ -69,7 +70,9 @@ sub main {
     mkdir $statedir unless -d $statedir;
 
     if($Config{graphite}) {
-	open($graphite, "|nc -q 2 $Config{graphite} 2003") || die("Failed to netcat $Config{graphite}: $!");
+	my ($host, $port) = split(/:/, $Config{graphite});
+	$port = 2003 unless $port;
+	open($graphite, "|nc -q 2 $host $port") || die("Failed to netcat $host $port: $!");
 
 	select $graphite;
     }
@@ -250,6 +253,24 @@ sub write {
 
     print "$prefix.$key $value $date\n";
 }
+# 2011-10-29 07:13:13 1RK6qa-0001Gm-EV Completed
+sub readfrom_denyhosts {
+    my $fh = shift;
+
+    return unless ($_ = <$fh>);
+
+    &debug("line is [$_]");
+
+    my ($year, $month, $mday, $hour, $min, $sec, $millis, $message) = split(/[-: ,]+/, $_, 8);
+
+    &debug("$year $month $mday");
+
+    my $now = strftime("%s", $sec, $min, $hour, $mday, $month-1, $year-1900);
+
+    &debug("at $now, message is $message");
+
+    return ($now, $message);
+}
 
 # 2011-10-29 07:13:13 1RK6qa-0001Gm-EV Completed
 sub readfrom_exim {
@@ -257,9 +278,11 @@ sub readfrom_exim {
 
     return unless ($_ = <$fh>);
 
-    my ($year, $month, $mday, $hour, $min, $sec, $millis, $message) = split(/[-: ]+/, 8);
+    my ($year, $month, $mday, $hour, $min, $sec, $millis, $message) = split(/[-: ]+/, $_, 8);
 
     my $now = strftime("%s", $sec, $min, $hour, $mday, $month-1, $year-1900);
+
+    &debug("at $now, message is $message");
 
     return ($now, $message);
 }
@@ -270,7 +293,7 @@ sub readfrom_fail2ban {
 
     return unless ($_ = <$fh>);
 
-    my ($year, $month, $mday, $hour, $min, $sec, $millis, $message) = split(/[-: ,]+/, 8);
+    my ($year, $month, $mday, $hour, $min, $sec, $millis, $message) = split(/[-: ,]+/, $_, 8);
 
     my $now = strftime("%s", $sec, $min, $hour, $mday, $month-1, $year-1900);
 
@@ -336,6 +359,8 @@ sub new {
 
     $self->{key}=$key;
     $self->{re}=$re;
+
+    &main::debug("matcher $key matches /$re/");
 
     return $self;
 }
