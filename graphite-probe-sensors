@@ -34,7 +34,7 @@ sub main {
     my $now = strftime("%s", localtime);
 
     unless(defined $Config{prefix}) {
-	$Config{prefix} = "system." . hostname . ".sensors" 
+	$Config{prefix} = "system." . hostname ;
     }
 
 
@@ -60,7 +60,7 @@ sub main {
 	    my $key = $1;
 	    my $value = $2;
 
-	    &write("$module.$key.level", $value, $now);
+	    &write("sensors.$module.$key.level", $value, $now);
 	}
     }
 
