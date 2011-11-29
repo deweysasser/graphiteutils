@@ -123,14 +123,17 @@ sub disk {
 
 	&write("disk.all.read.op_count", $tot_reads);
 	&write("disk.all.read.merged_op_count", $tot_readsmerged);
+        &write("disk.all.read.time.millis", $tot_readtime);
 
 	&write("disk.all.write.op_count", $tot_writes);
 	&write("disk.all.write.merged_op_count", $tot_writemerged);
+        &write("disk.all.write.time.millis", $tot_writetime);
 
 	&write("disk.all.read.byte_count", $tot_readsectors*512);
 	&write("disk.all.write.byte_count", $tot_writesectors*512);
 
 	&write("disk.all.queuesize", $tot_outstanding);
+        &write("disk.all.time.weighted_ms", $tot_weighted);
 
     close $file;
 }
