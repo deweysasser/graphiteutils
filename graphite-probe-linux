@@ -65,7 +65,7 @@ sub processFileOptions {
     while(<$options>) {
 	next if /^\s*#/;
 	next if /^\s*$/;
-	chop;
+	chop if /[\r\n]$/;
 	push(@ARGV, split(/\s+/));
     }
 
