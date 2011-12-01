@@ -1,0 +1,142 @@
+#!/usr/bin/perl
+
+# purpose:  probe only disk latency
+
+use Time::Local;
+use Getopt::Long; 
+use strict;
+use vars '%Config', '@Columns';
+use POSIX 'strftime';
+use Sys::Hostname;
+use File::Basename;
+
+$Config{date}=strftime("%s", localtime);
+$Config{pollTime}=30;
+
+our %Options=(
+    "prefix=s"  => \$Config{prefix},
+    "poll-time=s" => \$Config{pollTime},
+    "show-drives=s" => \$Config{showDrive},
+    "column=s@" => \@Columns,
+    "graphite-host=s" => \$Config{graphiteHost},
+    );
+
+unless(GetOptions(%Options)) {
+    die("Failed to parse options");
+}
+unless(defined $Config{prefix}) {
+    $Config{prefix} = "system." . hostname ;
+}
+
+&processFileOptions;
+&main;
+
+sub main {
+
+    my $graphite;
+
+    if($Config{graphiteHost}) {
+	my ($host, $port) = split(/:/, $Config{graphiteHost});
+	$port = 2003 unless $port;
+	open($graphite, "|nc $host $port") || die("Failed to netcat to $host:$port: $!");
+	select $graphite;
+    }
+
+    my $firstTime=time;
+    my $first = &readDrives();
+    sleep($Config{pollTime});
+    my $nextTime=time;
+    my $second = &readDrives();
+
+    &writeLatency(($nextTime - $firstTime), $first, $second);
+
+    $Config{date}=strftime("%s", localtime);
+
+    close($graphite) if $graphite;
+}
+
+sub readDrives {
+    my $dir = dirname($0);
+    my $command = "$dir/graphite-probe-linux";
+
+    my $hash;
+
+    $command .= " -show-drives '$Config{showDrive}'" if $Config{showDrive};
+
+#    print "Command is $command\n";
+
+    open(my $probe, "$command|") || die("Failed to run $command: $!");
+
+    while(<$probe>) {
+	my ($key, $value, $time) = split(/\s/);
+	next unless $key =~ /disk\.((by\w+\.)?(\w+))\.(.*)/;
+	my $disk = $1;
+	my $name = $4;
+
+	$hash->{$disk}->{$name}=$value;
+
+    }
+
+    close $probe;
+    return $hash;
+}
+
+sub writeLatency {
+    my $time = shift;
+    my $first = shift;
+    my $second = shift;
+
+    foreach my $disk (keys %$second) {
+
+#	print "Disk is $disk\n";
+	my $one = $first->{$disk};
+	my $two = $second->{$disk};
+	
+	&write("disk.$disk.read.average_latency_millis", &calculateLatency("read", $one, $two));
+	&write("disk.$disk.write.average_latency_millis", &calculateLatency("write", $one, $two));
+    }
+}
+
+sub calculateLatency {
+    my $key = shift;
+    my $one = shift;
+    my $two = shift;
+
+    my $deltaOp = $two->{"${key}.op_count"} - $one->{"${key}.op_count"};
+    my $deltaTime = $two->{"${key}.time.millis"} - $one->{"${key}.time.millis"};
+
+    return 0 if $deltaOp < 1;
+    my $latency = $deltaTime/$deltaOp;
+
+ #   print "ops = $deltaOp, time = $deltaTime\n";
+
+    return $latency;
+}
+
+sub processFileOptions {
+    my $file = "$0.options";
+
+    return unless -r $file;
+
+    open(my $options, $file) || die("Failed to read $file: $!");
+    @ARGV=();
+
+    while(<$options>) {
+	next if /^\s*#/;
+	next if /^\s*$/;
+	chop if /[\r\n]$/;
+	push(@ARGV, split(/\s+/));
+    }
+
+    close $options;
+
+    &GetOptions(%Options);
+}
+
+sub write {
+    my $subkey = shift;
+    my $value = shift;
+    $value = 0 unless $value;
+
+    print "$Config{prefix}.$subkey $value $Config{date}\n";
+}
