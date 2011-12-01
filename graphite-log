@@ -37,13 +37,14 @@ $Config{bucket}=60;
 $Config{prefix}="system." . hostname;
 
 unless(GetOptions(
-    "debug" => \$Config{debug},
-    "syntax=s" => \$Config{syntax},
-    "bucket=s" => \$Config{bucket},
-    "prefix=s" => \$Config{prefix},
-    "graphite-server=s" => \$Config{graphite},
-    "current-year=s" => \$Config{currentYear},
-    "file=s@" => \$Config{files},
+	   "debug" => \$Config{debug},
+	   "syntax=s" => \$Config{syntax},
+	   "bucket=s" => \$Config{bucket},
+	   "prefix=s" => \$Config{prefix},
+	   "nostate" => \$Config{nostate},
+	   "graphite-server=s" => \$Config{graphite},
+	   "current-year=s" => \$Config{currentYear},
+	   "file=s@" => \$Config{files},
        )) {
     print STDERR "Invalid usage\n";
     exit 1;
@@ -92,13 +93,21 @@ sub main {
 	    $filekey =~ s/[^a-zA-Z0-9_]/_/g;
 	}
 
-	my $state = $file;
-	$state =~ s/\//_/g;
-	$state = "$statedir/$state";
-	mkdir $state unless -d $state;
-	&debug("State for $file is $state");
+	my $statefile;
+	unless($Config{nostate}) {
+	    mkdir $statedir unless -d $statedir;
+	    $statefile = "$statedir/$filekey";
+	    &debug("State for $file is $statefile");
+	}
 
-	($bucket, $keys) = &readState($state);
+	my $line=0;
+
+	my $state = &readState($statefile);
+
+	$bucket = $state->{bucket};
+	foreach my $key (@{$state->{keys}}) {
+	    $keys->{$key}=0;
+	}
 
 	my $log;
 
@@ -106,14 +115,14 @@ sub main {
 	    $log=\*STDIN;
 	}
 	else {
-	    system("mkdir -p $state") && die("Failed to create state dir $state: $!");
-	    my $cmd = "/usr/sbin/logtail2 -f $file -o $state/logtail.state";
-	    &debug("$cmd");
-	    open($log, "$cmd|" ) || die("Failed to read from $file: $!");
+	    $log = &openLogFile($file, $state) || die("Failed to read from $file: $!");
 	}
+
+	my $lastLine;
 
 	do {
 	    ($date, $message) = &$parser($log);
+	    $lastLine = $.;
 
 	    $bucket = int($date/$Config{bucket});
 
@@ -138,7 +147,9 @@ sub main {
 	    }
 	} while ($date);
 	close $log;
-	&recordState($state, $bucket, $keys);
+	$state->{line}=$lastLine;
+	$state->{bucket} = $bucket;
+	&recordState($statefile, $state, $keys) if $statefile;
 	&debug("Done with $file");
     }
 
@@ -149,43 +160,84 @@ sub main {
     &debug("Why are we still here after exit?");
 }
 
+sub openLogFile {
+    my $file = shift;
+    my $state = shift;
+
+    my $line = 0;
+
+    my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
+     $atime,$mtime,$ctime,$blksize,$blocks)
+	= stat($file);
+
+    if($ino == $state->{inode}) {
+	$line = $state->{line};
+    }
+    else {
+	$state->{inode}=$ino;
+    }
+
+    $state->{file}=$file;
+
+    open(my $fh, $file) || die("Failed to read $file: $!");
+
+    while($line--) {
+	<$fh>
+    }
+
+    return $fh;
+}
+
 sub readState {
-    my $dir = shift;
-    my $file = "$dir/log.state";
+    my $file = shift;
+
+    my $state;
 
     return unless -f $file;
 
     open(my $fh, $file) || die("Failed to read $file: $!");
 
-    my $bucket = <$fh>;
-
-    return unless $bucket;
-    chop $bucket;
-
-    my $keys;
-
     while(<$fh>) {
 	chop;
-	$keys->{$_}=0;
-    }
-    
-    close $fh;
+	next if /^\s*#/;
+	next if /^\s*$/;
 
-    return ($bucket, $keys);
+	my ($key, $value) = split(/=/, $_, 2);
+
+	if($key eq "keys") {
+	    @{$state->{keys}} = split(/,\s*/, $value);
+	}
+	else {
+	    $state->{$key}=$value;
+	}
+    }
+
+    return $state;
 }
 
 sub recordState {
     my $statefile = shift;
-    my $bucket = shift;
+    my $state =shift;
     my $keys = shift;
 
-    my $file = "$statefile/log.state";
+    @{$state->{keys}}=keys %$keys;
+
+    my $file = $statefile;
+
+    &debug("Writing state to $file");
 
     open(my $fh, ">$file") || die("Failed to record state to $file: $!");
 
-    print $fh "$bucket\n";
-    foreach my $key (keys %$keys) {
-	print $fh "$key\n";
+    foreach my $key (sort keys %$state) {
+	my $value = $state->{$key};
+	if(ref($value) =~ /ARRAY/) {
+	    print $fh "$key=";
+	    print $fh join(", ", @$value);
+	    print $fh "\n";
+	}
+	else {
+	    print $fh "$key=$value\n";
+	}
     }
 
     close $fh;
@@ -411,13 +463,13 @@ sub matches {
 
     return 0 unless $re;
 
-    &main::debug("** Matcher /$re/ testing [$message]");
+#    &main::debug("** Matcher /$re/ testing [$message]");
 
     if($message =~ /$re/) {
-	&main::debug("***Matches");
+#	&main::debug("***Matches");
 	return 1;
     }
-	&main::debug("*!! No Match");
+#	&main::debug("*!! No Match");
 
     return 0;
 }
