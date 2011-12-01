@@ -73,7 +73,7 @@ sub main {
     if($Config{graphite}) {
 	my ($host, $port) = split(/:/, $Config{graphite});
 	$port = 2003 unless $port;
-	open($graphite, "|nc -q 2 $host $port") || die("Failed to netcat $host $port: $!");
+	open($graphite, "|nc $host $port") || die("Failed to netcat $host $port: $!");
 
 	select $graphite;
     }
@@ -116,6 +116,7 @@ sub main {
 	}
 	else {
 	    $log = &openLogFile($file, $state) || die("Failed to read from $file: $!");
+	    &debug("Log file is open for reading");
 	}
 
 	my $lastLine;
@@ -123,6 +124,8 @@ sub main {
 	do {
 	    ($date, $message) = &$parser($log);
 	    $lastLine = $.;
+
+	    &debug("Read line for $date");
 
 	    $bucket = int($date/$Config{bucket});
 
@@ -358,24 +361,30 @@ sub readfrom_apache {
 
     my $line = <$fh>;
 
-#    &debug("read [$line]");
+    &debug("read [$line]");
       my ($host,$user,$date,$url_with_method,$status,$size,$referrer,$agent) = $line =~
-          m/^(\S+) - (\S+) \[(\S+ [\-|\+]\d{4})\] "(\S+ \S+ [^"]+)" (\d{3}) (\d+|-) "(.*?)" "([^"]+)"$/;
+          m/^(\S+) - (\S+) \[(\S+ [\-|\+]\d{4})\] "(\S+ \S+ [^"]+)" (\d{3}) (\d+|-) "(.*?)" "([^"]+)"/;
 
+    &debug("date = $date, host = $host");
     return unless $date;
 
 #    die("Failed to get date from [$line] on line # $.") unless $date;
-#    &debug("date = $date, host = $host");
 
     # date is something like: 30/Nov/2011:07:38:59 -0500
     my ($mday, $month, $year, $hour, $min, $sec, $tz) = split(/[\/:\s]/, $date);
 
     my $timegm = timegm($sec, $min, $hour, $mday, $Months{$month}, $year-1900);
     # Now adjust for the timezone
-    my $tzadjustment = int($tz / 100) + int($tz%100)/60;
-    $timegm +- $tzadjustment;
+
+#    &debug("gmtime was " , strftime("%x %X", gmtime($timegm)));
+    my $tzadjustment = int($tz / 100)*3600 + int($tz%100)*60;
+
+#    &debug("tz adjust is $tzadjustment");
+    $timegm -= $tzadjustment;
 
     my $now = strftime("%s", gmtime($timegm));
+
+    &debug("Now is ", strftime("%x %X", localtime($now)));
 
     my $message = join("\n", 
 		       "host=$host",
