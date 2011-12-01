@@ -169,12 +169,26 @@ sub getDriveMap {
 
     while(<$ls>) {
 	chop;
-	next unless(/([a-zA-Z0-9_-]+) -> ..\/(dm-\d+)/);
-	my ($name, $drive) = ($1, $2);
+	# lines like
+	# lrwxrwxrwx 1 root root      7 2011-11-23 21:47 system-root--snapshot -> ../dm-3
+
+	my ($name, $drive);
+
+	if(/([a-zA-Z0-9_-]+) -> ..\/(dm-\d+)/) {
+	    ($name, $drive) = ($1, $2);
+	}
+
+	# lines like
+	# brw-rw---- 1 root disk 252, 20 2011-11-02 19:01 storage-svn
+	if(/^b.*252,\s+(\d+)\s+[\s\d:-]+([^\s]+)/) {
+	    $name = $2;
+	    $drive = "dm-$1";
+	}
+
 	$name =~ s/--/\*/g;
 	$name =~ s/-/_/g;
 	$name =~ s/\*/-/g;
-
+	
 	$map->{$drive}=$name
     }
 
