@@ -10,21 +10,25 @@ use strict;
 use vars '%Config', '@Columns';
 use POSIX 'strftime';
 use Sys::Hostname;
+use File::Basename;
 
 $Config{date}=strftime("%s", localtime);
 
-
-unless(GetOptions(
+our %Options=(
 	   "prefix=s"  => \$Config{prefix},
+	   "show-drives=s" => \$Config{showDrive},
 	   "column=s@" => \@Columns,
 	   "graphite-host=s" => \$Config{graphiteHost},
-       )) {
+    );
+
+unless(GetOptions(%Options)) {
     die("Failed to parse options");
 }
-
 unless(defined $Config{prefix}) {
     $Config{prefix} = "system." . hostname ;
 }
+
+&processFileOptions;
 
 
 &main;
@@ -48,6 +52,26 @@ sub main {
 
 
     close($graphite) if $graphite;
+}
+
+sub processFileOptions {
+    my $file = "$0.options";
+
+    return unless -r $file;
+
+    open(my $options, $file) || die("Failed to read $file: $!");
+    @ARGV=();
+
+    while(<$options>) {
+	next if /^\s*#/;
+	next if /^\s*$/;
+	chop;
+	push(@ARGV, split(/\s+/));
+    }
+
+    close $options;
+
+    &GetOptions(%Options);
 }
 
 # cat /proc/net/dev
@@ -92,50 +116,92 @@ sub network {
 sub disk { 
     open(my $file, "/proc/diskstats") || return 0;
 
-    my (
-	    $tot_reads, $tot_readsmerged, $tot_readsectors, $tot_readtime, 
-	    $tot_writes, $tot_writemerged, $tot_writesectors, $tot_writetime,
-	    $tot_outstanding, $tot_iotime, $tot_weighted) = split(/\s+/);
+    my @totals=(0,0,0,0,0,0,0,0,0,0,0,0,0);
+    my $map = {};
+    my $showRe = "   none    ";
+    if($Config{showDrive}) {
+	$map = &getDriveMap;
+	$showRe = $Config{showDrive};
+    }
 
     while(<$file>) {
 	# trim leading whitespace
 	$_ =~ s/^\s*//;
-	my ($major, $minor, $name, 
-	    $reads, $readsmerged, $readsectors, $readtime, 
-	    $writes, $writemerged, $writesectors, $writetime,
-	    $outstanding, $iotime, $weighted) = split(/\s+/);
-	next unless $name =~ /^sd[a-z]$/;
+	my @drive = split(/\s+/);
+	my $name = $drive[2];
+	$drive[2] = &getDriveFromMap(@drive[2], $map);
+	&writeDisk(@drive) if ($name =~ /$showRe/ || $drive[2] =~ /$showRe/);
 
-	$tot_reads+=$reads;
-	$tot_readsmerged+=$readsmerged;
-	$tot_readsectors+=$readsectors;
-	$tot_readtime+=$readtime;
-	$tot_writes+=$writes;
-	$tot_writemerged+=$writemerged;
-	$tot_writesectors+=$writesectors;
-	$tot_writetime+=$writetime;
-	$tot_outstanding+=$outstanding;
-	$tot_iotime+=$iotime;
-	$tot_weighted+=$weighted;
+	next unless $drive[2] =~ /^bydrive\.sd[a-z]$/;
 
-
+	for(my $i=3; $i<14; $i++) {
+	    $totals[$i]+=$drive[$i];
+	}
     }
 
-	&write("disk.all.read.op_count", $tot_reads);
-	&write("disk.all.read.merged_op_count", $tot_readsmerged);
-        &write("disk.all.read.time.millis", $tot_readtime);
+    $totals[2]="all";
 
-	&write("disk.all.write.op_count", $tot_writes);
-	&write("disk.all.write.merged_op_count", $tot_writemerged);
-        &write("disk.all.write.time.millis", $tot_writetime);
-
-	&write("disk.all.read.byte_count", $tot_readsectors*512);
-	&write("disk.all.write.byte_count", $tot_writesectors*512);
-
-	&write("disk.all.queuesize", $tot_outstanding);
-        &write("disk.all.time.weighted_ms", $tot_weighted);
+    &writeDisk(@totals);
 
     close $file;
+}
+
+sub getDriveFromMap {
+    my $drive = shift;
+    my $map = shift;
+
+    my $result = $map->{$drive};
+
+    my $category = "bydrive";
+
+    $category = "byvolume" if $drive =~ /^dm-/;
+    $category = "byraid" if $drive =~ /^md\d+$/;
+    $category = "bypartition" if $drive =~ /^sd\w\d$/;
+
+    return "$category.$result" if $result;
+
+    return "$category.$drive";
+}
+
+sub getDriveMap {
+    my $map;
+    open(my $ls, "ls -l /dev/mapper |") || die("Failed to read ls /dev/mapper: $!");
+
+    while(<$ls>) {
+	chop;
+	next unless(/([a-zA-Z0-9_-]+) -> ..\/(dm-\d+)/);
+	my ($name, $drive) = ($1, $2);
+	$name =~ s/--/\*/g;
+	$name =~ s/-/_/g;
+	$name =~ s/\*/-/g;
+
+	$map->{$drive}=$name
+    }
+
+    close $ls;
+    return $map;
+}
+
+sub writeDisk {
+    my ($major, $minor, $name, 
+	$reads, $readsmerged, $readsectors, $readtime, 
+	$writes, $writemerged, $writesectors, $writetime,
+	$outstanding, $iotime, $weighted) = @_;
+
+	&write("disk.$name.read.op_count", $reads);
+	&write("disk.$name.read.merged_op_count", $readsmerged);
+        &write("disk.$name.read.time.millis", $readtime);
+
+	&write("disk.$name.write.op_count", $writes);
+	&write("disk.$name.write.merged_op_count", $writemerged);
+        &write("disk.$name.write.time.millis", $writetime);
+
+	&write("disk.$name.read.byte_count", $readsectors*512);
+	&write("disk.$name.write.byte_count", $writesectors*512);
+
+	&write("disk.$name.queuesize", $outstanding);
+        &write("disk.$name.time.weighted_ms", $weighted);
+
 }
 
 
