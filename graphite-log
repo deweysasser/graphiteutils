@@ -41,6 +41,7 @@ unless(GetOptions(
 	   "syntax=s" => \$Config{syntax},
 	   "bucket=s" => \$Config{bucket},
 	   "prefix=s" => \$Config{prefix},
+           "log-prefix=s" => \$Config{logPrefix},
 	   "nostate" => \$Config{nostate},
 	   "graphite-server=s" => \$Config{graphite},
 	   "current-year=s" => \$Config{currentYear},
@@ -49,6 +50,8 @@ unless(GetOptions(
     print STDERR "Invalid usage\n";
     exit 1;
 }
+
+$Config{logPrefix} = $Config{syntax} unless $Config{logPrefix};
 
 &main;
 
@@ -129,6 +132,8 @@ sub main {
 
 	    $bucket = int($date/$Config{bucket});
 
+            &debug("*** bucket  is $bucket");
+
 	    if($lastbucket != $bucket && $lastbucket > 0) {
 		&dump($counter, $lastbucket*$Config{bucket}, $keys);
 		&catchup($lastbucket, $bucket, $keys);
@@ -143,6 +148,7 @@ sub main {
 #		    &debug("Checking $message against /$re/");
 		    if($matcher->matches($message)) {
 			my $key = $matcher->key;
+                        &debug("Yup, matches.  Increment count for $key");
 			$keys->{$key}=1;
 			$counter->{$key}++;
 		    }
@@ -290,7 +296,9 @@ sub dump {
     }
 
     foreach my $key (keys %$counter) {
-	my $metric = "$Config{prefix}.$key";
+	my $metric = $Config{prefix};
+        $metric .= ".$Config{logPrefix}" if $Config{logPrefix};
+        $metric .= ".$key";
 	my $value = $counter->{$key};
 	print "$metric $value $date\n";
     }
@@ -382,7 +390,7 @@ sub readfrom_apache {
 #    &debug("tz adjust is $tzadjustment");
     $timegm -= $tzadjustment;
 
-    my $now = strftime("%s", gmtime($timegm));
+    my $now = $timegm;
 
     &debug("Now is ", strftime("%x %X", localtime($now)));
 
