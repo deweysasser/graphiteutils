@@ -21,5 +21,7 @@ if [ -z "$graphite" ] ; then
 fi
 
 for probe in $dir/graphite-probe*; do
-  $probe  -prefix $prefix -graphite $graphite
+    if [ -x $probe ] ; then
+	$probe  -prefix $prefix -graphite $graphite
+    fi
 done
