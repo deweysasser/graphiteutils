@@ -4,10 +4,11 @@ dir=/var/lib/graphite/probes
 
 while [ -n "$*" ] ; do
   case $1 in 
-    -prefix) prefix="$2"; shift;;
-    -grahpite) graphite="$2"; shift;;
-    -*) echo "Unknown option $1"; exit 1;;
-    *) echo "Unknown argument $1"; exit 2;;
+      -prefix) prefix="$2"; shift;;
+      -grahpite) graphite="$2"; shift;;
+      -sleep) sleep="$2"; shift;;
+      -*) echo "Unknown option $1"; exit 1;;
+      *) echxo "Unknown argument $1"; exit 2;;
   esac    
   shift
 done
@@ -20,7 +21,11 @@ if [ -z "$graphite" ] ; then
     graphite="graphite"
 fi
 
+# splay the load on the graphite server
+test -n "$sleep" && sleep $sleep
+
 for probe in $dir/graphite-probe*; do
+    echo "running $probe"
     if [ -x $probe ] ; then
 	$probe  -prefix $prefix -graphite $graphite
     fi
