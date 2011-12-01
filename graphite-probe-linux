@@ -45,10 +45,10 @@ sub main {
     }
 
 
-    &cpu;
-    &load;
-    &disk;
-    &network;
+    &probe_cpu;
+    &probe_load;
+    &probe_disk;
+    &probe_network;
 
 
     close($graphite) if $graphite;
@@ -80,7 +80,7 @@ sub processFileOptions {
 #  lo:709708566 2367582    0    0    0     0          0         0 709708566 2367582    0    0    0     0       0          0
 #  eth0:3874460054 88403338 6793 7034    0     0          0         0 1638409025 11341491    0    0    0     0       0          0
 
-sub network {
+sub probe_network {
     my $fd;
 
     open($fd, "/proc/net/dev") || die("Failed to read /proc/net/dev: $!");
@@ -113,7 +113,7 @@ sub network {
     close($fd);
 }
 
-sub disk { 
+sub probe_disk { 
     open(my $file, "/proc/diskstats") || return 0;
 
     my @totals=(0,0,0,0,0,0,0,0,0,0,0,0,0);
@@ -219,7 +219,7 @@ sub writeDisk {
 }
 
 
-sub cpu {
+sub probe_cpu {
     open(my $cpu, "/proc/stat") || return 0;
     my $cpuCount;
 
@@ -240,7 +240,7 @@ sub cpu {
 
 }
 
-sub load {
+sub probe_load {
     open(my $loadavg, "/proc/loadavg") || return 0;
     while(<$loadavg>) {
 	chop;
