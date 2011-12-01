@@ -25,7 +25,6 @@ fi
 test -n "$sleep" && sleep $sleep
 
 for probe in $dir/graphite-probe*; do
-    echo "running $probe"
     if [ -x $probe ] ; then
 	$probe  -prefix $prefix -graphite $graphite
     fi
