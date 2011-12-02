@@ -44,7 +44,7 @@ sub main {
     if($Config{graphiteHost}) {
 	my ($host, $port) = split(/:/, $Config{graphiteHost});
 	$port = 2003 unless $port;
-	open($graphite, "|nc $host $port") || die("Failed to netcat to $host:$port: $!");
+	open($graphite, "|nc -q 2 $host $port") || die("Failed to netcat to $host:$port: $!");
 	select $graphite;
     }
 
