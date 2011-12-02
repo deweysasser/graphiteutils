@@ -12,6 +12,15 @@ use POSIX 'strftime';
 use Sys::Hostname;
 use File::Basename;
 
+our %CaptureMemory = (
+    "MemFree" => "MemTotal",
+    "Buffers" => "MemTotal",
+    "Cached" => "MemTotal",
+    "SwapFree" => "SwapTotal",
+    "Active" => "MemTotal",
+    "Inactive" => "MemTotal",
+);
+
 $Config{date}=strftime("%s", localtime);
 
 our %Options=(
@@ -50,6 +59,7 @@ sub main {
     &probe_load;
     &probe_disk;
     &probe_network;
+    &probe_memory;
 
 
     close($graphite) if $graphite;
@@ -73,6 +83,29 @@ sub processFileOptions {
     close $options;
 
     &GetOptions(%Options);
+}
+
+sub probe_memory {
+    my $fd;
+
+    open($fd, "/proc/meminfo") || die("Failed to read /proc/meminfo: $!");
+
+    my %values;
+
+    while(<$fd>) {
+	chop;
+	my ($key, $value, $unit) = split(/[:\s]+/, $_);
+	$value *= 1024 if $unit eq "kB";
+
+	$values{$key}=$value;
+
+	my $base = $CaptureMemory{$key};
+
+	&write("memory.$key.bytes", $value) if $base;
+	&write("memory.$key.percent", $value/$values{$base}*100) if $base;
+    }
+
+    close $fd;
 }
 
 # cat /proc/net/dev
