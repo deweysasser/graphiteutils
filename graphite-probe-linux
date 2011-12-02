@@ -224,21 +224,26 @@ sub writeDisk {
 	$writes, $writemerged, $writesectors, $writetime,
 	$outstanding, $iotime, $weighted) = @_;
 
-	&write("disk.$name.read.op_count", $reads);
-	&write("disk.$name.read.merged_op_count", $readsmerged);
-        &write("disk.$name.read.time.millis", $readtime);
-
-	&write("disk.$name.write.op_count", $writes);
+    if(&isPhysicalDisk($name)) {
+	# These attribtues only make sense for physical disks
+        &write("disk.$name.read.merged_op_count", $readsmerged);
 	&write("disk.$name.write.merged_op_count", $writemerged);
-        &write("disk.$name.write.time.millis", $writetime);
-
-	&write("disk.$name.read.byte_count", $readsectors*512);
-	&write("disk.$name.write.byte_count", $writesectors*512);
-
-	&write("disk.$name.queuesize", $outstanding);
         &write("disk.$name.time.weighted_ms", $weighted);
+	&write("disk.$name.queuesize", $outstanding);
+    }
+
+    &write("disk.$name.read.op_count", $reads);
+    &write("disk.$name.read.time.millis", $readtime);
+
+    &write("disk.$name.write.op_count", $writes);
+    &write("disk.$name.write.time.millis", $writetime);
+
+    &write("disk.$name.read.byte_count", $readsectors*512);
+    &write("disk.$name.write.byte_count", $writesectors*512);
+
 
 }
+
 
 sub probe_cpu {
     open(my $cpu, "/proc/stat") || return 0;
