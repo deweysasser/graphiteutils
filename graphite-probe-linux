@@ -15,10 +15,11 @@ use File::Basename;
 $Config{date}=strftime("%s", localtime);
 
 our %Options=(
-	   "prefix=s"  => \$Config{prefix},
-	   "show-drives=s" => \$Config{showDrive},
-	   "column=s@" => \@Columns,
-	   "graphite-host=s" => \$Config{graphiteHost},
+    "prefix=s"  => \$Config{prefix},
+    "show-drives=s" => \$Config{showDrive},
+    "debug" => \$Config{debug},
+    "column=s@" => \@Columns,
+    "graphite-host=s" => \$Config{graphiteHost},
     );
 
 unless(GetOptions(%Options)) {
@@ -165,35 +166,56 @@ sub getDriveFromMap {
 
 sub getDriveMap {
     my $map;
-    open(my $ls, "ls -l /dev/mapper |") || die("Failed to read ls /dev/mapper: $!");
+    my $dir = "/dev/mapper";
+    opendir(my $dh, $dir) || die("Can't read $dir: $!");
 
-    while(<$ls>) {
-	chop;
-	# lines like
-	# lrwxrwxrwx 1 root root      7 2011-11-23 21:47 system-root--snapshot -> ../dm-3
+    my @files = readdir($dh);
 
-	my ($name, $drive);
+    closedir($dh);
 
-	if(/([a-zA-Z0-9_-]+) -> ..\/(dm-\d+)/) {
-	    ($name, $drive) = ($1, $2);
+    foreach my $file (@files) {
+	next if $file =~ /^\./;
+	next if $file eq "control";
+	my $path = "$dir/$file";
+
+	my ($name, $dm);
+
+	if ( -l $path ) { 
+	    # it's a link, so 
+	    $dm = basename(readlink($path));
+	    $name=$file;
 	}
+	else {
+	    # hopefully it's a device then
+	    my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
+	     $atime,$mtime,$ctime,$blksize,$blocks)
+		= stat($path);
 
-	# lines like
-	# brw-rw---- 1 root disk 252, 20 2011-11-02 19:01 storage-svn
-	if(/^b.*252,\s+(\d+)\s+[\s\d:-]+([^\s]+)/) {
-	    $name = $2;
-	    $drive = "dm-$1";
+	    $name=$file;
+
+	    my ($major, $minor);
+	    $minor = ($rdev & 0xff);
+	    $major = $rdev >> 8;
+
+	    next unless $major == 252;
+
+	    $dm = "dm-$minor";
 	}
 
 	$name =~ s/--/\*/g;
 	$name =~ s/-/_/g;
 	$name =~ s/\*/-/g;
-	
-	$map->{$drive}=$name
+
+	&debug("map:  $dm => $name");
+	$map->{$dm}=$name;
     }
 
-    close $ls;
     return $map;
+}
+
+sub isPhysicalDisk {
+    my $name = shift;
+    return $name =~ /^sd[a-z]$/;
 }
 
 sub writeDisk {
@@ -217,7 +239,6 @@ sub writeDisk {
         &write("disk.$name.time.weighted_ms", $weighted);
 
 }
-
 
 sub probe_cpu {
     open(my $cpu, "/proc/stat") || return 0;
@@ -258,4 +279,11 @@ sub write {
     $value = 0 unless $value;
 
     print "$Config{prefix}.$subkey $value $Config{date}\n";
+}
+
+
+sub debug {
+    return unless $Config{debug};
+
+    print "@_\n";
 }
