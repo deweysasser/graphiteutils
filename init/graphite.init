@@ -1,0 +1,67 @@
+#! /bin/sh
+
+### BEGIN INIT INFO
+# Provides:          graphite
+# Required-Start:    $network
+# Required-Stop:     $network
+# Default-Start:     3 4 5
+# Default-Stop:      1 3
+# Short-Description: Graphite graphing package
+# Description:       
+### END INIT INFO
+
+set -e
+
+graphite=/opt/graphite
+bindir=$graphite/bin
+defaults="/etc/default/graphite"
+
+if [ -r $defaults ] ; then 
+    . $defaults 
+    else
+    cat <<EOF > $defaults
+# Which graphite processes to start
+# GRAPHITE_PROCESSES="carbon-cache carbon-aggregator"
+# GRAPHITE_PROCESSES="carbon-cache"
+EOF
+fi
+
+
+processes="${GRAPHITE_PROCESSES:-carbon-cache}"
+
+start() {
+   for service in $*; do
+#     echo "Starting $service"
+     $bindir/$service.py start
+   done
+}
+
+stop() {
+   for service in $*; do
+#     echo "Stopping $service"
+     $bindir/$service.py stop
+   done
+}
+
+status() {
+  status=0
+  for service in $*; do
+    if pgrep $service > /dev/null; then
+  	echo "Graphite $service is up"
+    else
+       echo "Graphite $service is down"
+       status=$(($status+1))
+    fi
+  done
+
+  return $status
+}
+
+case $1 in
+  start)  start $processes;;
+  stop)   stop $processes;;
+  restart) stop $processes; start $processes;;
+  status) status $processes;;
+esac
+
+ 
