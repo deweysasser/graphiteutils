@@ -308,6 +308,15 @@ sub probe_load {
 #	&write("cpu.load_average.5_minute", $min5);
     }
 
+
+    my $pcount = `ps -ef | wc -l`;
+
+    chop $pcount;
+
+    $pcount --;
+
+    &write("process_count", $pcount);
+
     close $loadavg;
 }
 
