@@ -1,0 +1,6 @@
+[graphite]
+	ENVFILE /home/xymon/client/etc/xymonclient.cfg
+        NEEDS xymond
+        CMD /home/xymon/server/bin/xymon-graphite
+        LOGFILE $XYMONSERVERLOGS/xymon-graphite.log
+        INTERVAL 5m

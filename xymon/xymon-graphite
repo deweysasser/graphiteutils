@@ -1,0 +1,142 @@
+#!/usr/bin/perl
+
+# purpose:  Monitor graphite data and trigger outcomes in xymon
+
+use strict;
+use vars qw (%Config);
+use POSIX 'strftime';
+
+$Config{file}="/home/xymon/server/etc/graphite.cfg";
+
+&main;
+
+sub main {
+
+    open(my $fh, $Config{file}) || die("Failed to read $Config{file}: $!");
+
+    while(<$fh>) {
+	chop;
+	next if /^\s*$/;
+	next if /^\s*\#/;
+	
+	my @values = split(/\s+/);
+	my $column = $values[0];
+	shift @values;
+	my ($warn, $error, $url);
+
+	foreach my $value (@values) {
+
+	    $warn=$1 if $value=~/WARN=(\d+)/;
+	    $error=$1 if $value=~/ERROR=(\d+)/;
+	    $url=$value if $value =~ /^http/;
+	}
+
+	&process($column, $url, $warn, $error);
+    }
+}
+
+
+sub process {
+    my $column = shift;
+    my $url = shift;
+    my $warn = shift;
+    my $error = shift;
+
+    my $status=0;
+    my @content;
+
+    my ($from, $to);
+
+    my $linecount=0;
+
+    open(my $fh, "curl -s '$url&from=-5minutes&until=now&rawData=true'|") || return 0;
+
+    LINE: while(<$fh>) {
+	chop;
+	$linecount++;
+	my ($meta, $data) = split(/\|/,$_, 2);
+	my ($param, $start, $end, $rate) = split(/,/, $meta);
+	$from = $start;
+	$to = $end;
+
+	my $lineStatus=0;
+
+	VALUE: foreach my $value (split(/,/, $data)) {
+	    if ($value > $warn && $lineStatus < 1) {
+		$lineStatus = 1 ;
+#		print "$value more than warn $warn\n";
+	    }
+	    
+	    if ($value > $error) {
+		$lineStatus = 2 ;
+#		print "$value more than error $error\n";
+	    }
+	}
+
+	$status = &max($status, $lineStatus);
+
+	if($lineStatus eq 1) {
+	    push(@content, "$param exceeded warning threshold of $warn");
+	}
+	elsif($lineStatus eq 2) {
+	    push(@content, "$param exceeded error threshold of $error");
+	}
+    }
+
+#http://graphite/render?width=400&from=-20minutes&until=now&height=250&target=alias(color(lineWidth(dashed(threshold(1))%2C2)%2C%22yellow%22)%2C%22WARN%22)&uniq=0.0314605470321202&title=alias(color(lineWidth(dashed(threshold(1))%2C2)%2C%22yellow%22)%2C%22WARN%22)
+
+    if($status > 0) {
+	$url .= "&target=alias(color(dashed(threshold($warn)),\"yellow\"),\"WARNING\")";
+    }
+    if($status > 1) {
+	$url .= "&target=alias(color(dashed(threshold($error)),\"yellow\"),\"ERROR\")";
+    }
+
+
+    my $aFrom = strftime("%H%%3A%M_%Y%m%d", localtime($from));
+    my $aTo = strftime("%H%%3A%M_%Y%m%d", localtime($to));
+
+    $url .= "&from=$aFrom&until=$aTo";
+
+    $url .= "&width=400" unless $url =~ /&width/;
+    $url .= "&height=300" unless $url =~ /&height/;
+
+    if($linecount>5) {
+	my $height = 300 + 15 * $linecount;
+	$url .= "&height=$height&hideLegend=false";
+    }
+
+
+    $url =~ s/,/%2C/g;
+    $url =~ s/"/%22/g;
+
+    push(@content, "<img src=\"$url\"/>");
+
+    my $color;
+
+    $color = "green" if $status == 0;
+    $color = "yellow" if $status == 1;
+    $color = "red" if $status == 2;
+
+    my $time = strftime("%c", localtime($to));
+
+    unshift(@content, "Status as of $time");
+
+
+    my $content = join("\n", @content) . "\n";
+#    $content =~ s/'/\\'/g;
+
+    my $cmd = "bb localhost 'status $column $color $content'";
+
+    print $cmd;
+
+    return !system($cmd);
+}
+
+sub max {
+    my $a = shift;
+    my $b = shift;
+   
+    return $a if $a > $b;
+    return $b;
+}
