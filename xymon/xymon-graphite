@@ -5,8 +5,20 @@
 use strict;
 use vars qw (%Config);
 use POSIX 'strftime';
+use Getopt::Long;
+
+# this lives here because of file-read order in PERL
+@ExceedsCondition::ISA = 'Condition';
 
 $Config{file}="/home/xymon/server/etc/graphite.cfg";
+
+unless(&GetOptions(
+	    "debug" => \$Config{debug},
+	    "noreport" => \$Config{noreport},
+	    "f|config-file=s" => \$Config{file},
+       )) {
+    die("Failed processing options");
+}
 
 &main;
 
@@ -14,82 +26,158 @@ sub main {
 
     open(my $fh, $Config{file}) || die("Failed to read $Config{file}: $!");
 
+    my @probes = &readConfig($fh);
+
+    close $fh;
+    
+    foreach my $probe (@probes) {
+	&process($probe);
+    }
+}
+
+sub readConfig {
+    my $fh = shift;
+    my @probes;
+    my $currentProbe;
+
     while(<$fh>) {
 	chop;
+	next if /^\s*#/;
 	next if /^\s*$/;
-	next if /^\s*\#/;
-	
-	my @values = split(/\s+/);
-	my $column = $values[0];
-	shift @values;
-	my ($warn, $error, $url);
 
-	foreach my $value (@values) {
+	if ( /^\s*\[(.*)\]\s*$/) {
+	    $currentProbe->ensureValid if $currentProbe;
 
-	    $warn=$1 if $value=~/WARN=(\d+)/;
-	    $error=$1 if $value=~/ERROR=(\d+)/;
-	    $url=$value if $value =~ /^http/;
+	    $currentProbe = new Probe(section => $1);
+	    push(@probes, $currentProbe);
+
+#	    &debug("Section '$1'");
 	}
-
-	&process($column, $url, $warn, $error);
+	if (/^\s*([^\s=]+)\s*=\s*(.*)$/) {
+	    $currentProbe->{$1}=trim($2);
+#	    &debug("Recording '$1' = '" . $currentProbe->{$1} . "'");
+	}
     }
+
+    $currentProbe->ensureValid if $currentProbe;
+
+    return @probes;
+}
+
+sub trim {
+    my $arg = shift;
+    $arg =~ s/^\s*//;
+    $arg =~ s/\s*$//;
+
+    return $arg;
 }
 
 
 sub process {
-    my $column = shift;
-    my $url = shift;
-    my $warn = shift;
-    my $error = shift;
+    my $probe = shift;
+
+    my $warn = new ExceedsCondition(new ConstantSeries($probe->{warn}), 1);
+    my $error = new ExceedsCondition(new ConstantSeries($probe->{error}), 2);
 
     my $status=0;
     my @content;
 
-    my ($from, $to);
-
     my $linecount=0;
 
+    my $url = $probe->{url};
     open(my $fh, "curl -s '$url&from=-5minutes&until=now&rawData=true'|") || return 0;
 
-    LINE: while(<$fh>) {
+    my @series;
+
+     while(<$fh>) {
 	chop;
 	$linecount++;
-	my ($meta, $data) = split(/\|/,$_, 2);
-	my ($param, $start, $end, $rate) = split(/,/, $meta);
-	$from = $start;
-	$to = $end;
-
-	my $lineStatus=0;
-
-	VALUE: foreach my $value (split(/,/, $data)) {
-	    if ($value > $warn && $lineStatus < 1) {
-		$lineStatus = 1 ;
-#		print "$value more than warn $warn\n";
-	    }
-	    
-	    if ($value > $error) {
-		$lineStatus = 2 ;
-#		print "$value more than error $error\n";
-	    }
+	my $series = new Series($_);
+#	&debug("Handling series", $series->name);
+	if($series->name =~ /^warn/i) {
+	    $warn = $series unless $warn;
 	}
-
-	$status = &max($status, $lineStatus);
-
-	if($lineStatus eq 1) {
-	    push(@content, "$param exceeded warning threshold of $warn");
+	elsif($series->name =~ /^error/i) {
+	    $error = $series unless $error;
 	}
-	elsif($lineStatus eq 2) {
-	    push(@content, "$param exceeded error threshold of $error");
+	else {
+	    push(@series, $series);
 	}
     }
 
+    &debug("have warning series") if $warn;
+    &debug("have error series") if $error;
+
+    die("Failed to read series from url $url") unless @series;
+
+    close $fh;
+
+    my $status = new StatusCollector;
+
+    foreach my $series (@series) { 
+
+	 foreach my $value ($series->data) {
+	    $status->setStatus($series, $warn->status) if $warn->isTriggered($value);
+	    $status->setStatus($series, $error->status) if $error->isTriggered($value);
+	}
+    }
+
+
+    if($probe->isIndependent) {
+	foreach my $series (@series) {
+	    &report($status, $status->getStatus($series), $url, $linecount, $warn, $error, $probe->column($series), $series);
+	}
+    }
+    else {
+	&report($status, $status->getStatus, $url, $linecount, $warn, $error, $probe->column, @series);
+    }
+
+}
+
+sub report {
+    my $statusC = shift;
+    my $status = shift;
+    my $url = shift;
+    my $linecount = shift;
+    my $warn = shift;
+    my $error = shift;
+    my $column = shift;
+    my @series = @_;
+    my @content;
+
+    &debug("Reporting on column $column");
+
+    die("Must pass in some series") unless @series;
+
+    my $from = $series[0]->{start};
+    my $to = $series[0]->{end};
+
+    foreach my $series (@series) {
+	my $param = $series->name;
+	if($statusC->getStatus($series) eq 1) {
+	    push(@content, "$param exceeded warning threshold");
+	}
+	elsif($statusC->getStatus($series) eq 2) {
+	    push(@content, "$param exceeded error threshold");
+	}
+    }
+
+    
+    
 #http://graphite/render?width=400&from=-20minutes&until=now&height=250&target=alias(color(lineWidth(dashed(threshold(1))%2C2)%2C%22yellow%22)%2C%22WARN%22)&uniq=0.0314605470321202&title=alias(color(lineWidth(dashed(threshold(1))%2C2)%2C%22yellow%22)%2C%22WARN%22)
 
-    if($status > 0) {
-	$url .= "&target=alias(color(dashed(threshold($warn)),\"yellow\"),\"WARNING\")";
+
+    if($status > 0 ) {
+	my $threshold = $warn->{series}->{value};
+	if($threshold > 0) {
+	$url .= "&target=alias(color(dashed(threshold($threshold)),\"yellow\"),\"Xymon Warning Threshold ($threshold)\")";
+	}
     }
-    if($status > 1) {
-	$url .= "&target=alias(color(dashed(threshold($error)),\"yellow\"),\"ERROR\")";
+    if($status > 1 ) {
+	my $threshold = $error->{series}->{value};
+	if($threshold > 0) {
+	$url .= "&target=alias(color(dashed(threshold($threshold)),\"red\"),\"Xymon Error Threshold ($threshold)\")";
+	}
     }
 
 
@@ -130,8 +218,16 @@ sub process {
 
     print $cmd;
 
+    return if $Config{noreport};
     return !system($cmd);
 }
+
+sub debug {
+    return unless $Config{debug};
+
+    print "@_\n";
+}
+    
 
 sub max {
     my $a = shift;
@@ -139,4 +235,224 @@ sub max {
    
     return $a if $a > $b;
     return $b;
+}
+
+
+package Probe;
+
+sub new {
+    my $self = {};
+    my $class = shift;
+    my %args = @_;
+
+    bless $self, $class;
+
+    foreach my $arg (keys %args) {
+	$self->{$arg}=$args{$arg};
+    }
+
+    return $self;
+}
+
+sub isIndependent {
+    my $self = shift;
+    my $type = $self->{probetype};
+
+    return 1 if $type eq "independent";
+}
+
+sub getProblems {
+    my $self = shift;
+    my $name = $self->{section};
+    my @problems;
+
+     push(@problems, "missing url")     unless($self->{url});
+
+    if ($self->isIndependent) {
+	push(@problems, "missing columnregexp") unless $self->{columnregexp};
+	push(@problems, "missing columneval") unless $self->{columneval};
+    }
+    else {
+	push(@problems, "missing column") unless $self->{column};
+    }
+
+    return @problems;
+}
+
+sub ensureValid {
+    my $self = shift;
+    my @problems = $self->getProblems;
+    my $section = $self->{section};
+    if(@problems) {
+	die("Errors in probe '$section':\n  - " . join("\n  - ", @problems) . "\nProbe '$section' invalid ");
+    }
+}
+    
+
+sub column {
+    my $self = shift;
+    my $series = shift;
+
+    my $column = $self->{column};
+
+    return $column unless $series;
+    
+    # we need to come up with a per-series column
+
+    my $sname = $series->name;
+    my $re = $self->{columnregexp};
+
+    die("Must specify columnregexp for independent series in probe " . $self->{section}) unless $re;
+
+    $sname =~ /$re/;
+
+    my $columneval = $self->{columneval};
+
+    die("Must specify columneval for independent series in probe " . $self->{section}) unless $columneval;
+
+    eval "return \"$columneval\";";
+}
+    
+package Series;
+sub new {
+    my $self = {};
+    my $class = shift;
+    my $line = shift;
+
+    bless $self, $class;
+
+    my ($meta, $data) = split(/\|/, $line, 2);
+    my ($name, $start, $end, $period) = split(/,/, $meta);
+    my @data = split(/,/, $data);
+
+    $self->{name}=$name;
+    $self->{start}=$start;
+    $self->{end}=$end;
+    $self->{period}=$period;
+
+    $self->{data}=\@data;
+
+    return $self;
+}
+
+
+sub name {
+    my $self = shift;
+    return $self->{name};
+}
+
+sub data {
+    my $self = shift;
+    return @{$self->{data}};
+}
+
+sub column {
+    my $self = shift;
+
+    return $self->{column};
+}
+
+    
+package ConstantSeries;
+
+sub new {
+    my $self = {};
+    my $class = shift;
+    my $value = shift;
+
+    $self->{value}=$value;
+
+    bless $self, $class;
+
+    return $self;
+}
+
+sub datum {
+    return $_[0]->{value};
+}
+
+package Condition;
+sub new {
+    my $self = {};
+    my $class = shift;
+    my $series = shift;
+    my $status = shift;
+
+    $self->{series}=$series;
+    $self->{status} = $status;
+    
+
+    bless $self, $class;
+
+    return $self;
+}
+
+sub status {
+    my $self = shift;
+    return $self->{status};
+}
+    
+package ExceedsCondition;
+
+sub isTriggered {
+    my $self = shift;
+    my $value  = shift;
+
+    my $ref = $self->{series}->datum;
+
+    return if $value eq "None";
+
+    if($value > $ref) {
+#	&main::debug($value, ">", $self->{value}, ": Condition is triggered");
+	return 1 ;
+    }
+#	&main::debug($value, ">", $self->{value}, ": Condition NOT triggered");
+    return 0;
+}
+
+
+package StatusCollector;
+sub new {
+    my $self = {};
+    my $class = shift;
+    my %args = @_;
+
+    bless $self, $class;
+
+    foreach my $arg (keys %args) {
+	$self->{$arg}=$args{$arg};
+    }
+
+    return $self;
+}
+
+sub setStatus {
+    my $self = shift;
+    my $series = shift;
+    my $status = shift;
+
+    $status = 0 unless $status;
+
+    if($series) {
+	$self->{status}->{$series} = $status if $status > $self->{status}->{$series};
+#	&main::debug("Status of $series is ", $self->{status}->{$series});
+    }
+
+    $self->{overallstatus} = $status if $status > $self->{overallstatus};
+#    &main::debug("Overall status is ", $self->{overallstatus});
+}
+
+sub getStatus {
+    my $self = shift;
+    my $series = shift;
+
+    return $self->{overallstatus} unless $series;
+
+    return $self->{status}->{$series};
+}
+
+sub getSeries {
+    my $self = shift;
+
+    return keys %{$self->{status}};
 }
