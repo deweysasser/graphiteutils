@@ -38,7 +38,7 @@ sub main {
     }
 
 
-    open(my $ping, "ping -c $Config{count} $Config{host}|") || die("Failed to run ping $Config{host}: $!");
+    open(my $ping, "ping -c $Config{count} $Config{host} 2>&1 |") || die("Failed to run ping $Config{host}: $!");
 
     my @times;
     my $loss;
@@ -50,26 +50,32 @@ sub main {
 	if(/(\d+)% packet loss/) {
 	    $loss = $1;
 	}
+	if(/^ping: unknown host/) {
+	    close $ping;
+	    return;
+	}
     }
 
     close $ping;
 
     my @times = sort { $a <=> $b} @times;
 
-    my ($min, $max, $average, $count) = &stats(@times);
-    my $stddev = &stddev($average, @times);
-    my $median = $times[int($#times)*.5];
-    my $ninety = $times[int($#times)*.9];
+	my ($min, $max, $average, $count) = &stats(@times);
+	my $stddev = &stddev($average, @times);
+	my $median = $times[int($#times)*.5];
+	my $ninety = $times[int($#times)*.9];
 
     my $hostkey = $Config{host};
     $hostkey =~ s/[^[a-zA-Z0-9_-]/_/g;
 
-    &write("ping.$hostkey.min.ms", $min);
-    &write("ping.$hostkey.max.ms", $max);
-    &write("ping.$hostkey.average.ms", $average);
-    &write("ping.$hostkey.stddev.ms", $stddev);
-    &write("ping.$hostkey.median.ms", $median);
-    &write("ping.$hostkey.90percent.ms", $ninety);
+    if(@times) {
+	&write("ping.$hostkey.min.ms", $min);
+	&write("ping.$hostkey.max.ms", $max);
+	&write("ping.$hostkey.average.ms", $average);
+	&write("ping.$hostkey.stddev.ms", $stddev);
+	&write("ping.$hostkey.median.ms", $median);
+	&write("ping.$hostkey.90percent.ms", $ninety);
+    }
     &write("ping.$hostkey.packet_loss.percent", $loss);
 
     close $graphite if $graphite;
