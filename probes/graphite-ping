@@ -122,7 +122,7 @@ sub write {
 
     my $metric = "$Config{prefix}.$key";
 
-    $metric =~ s/[^a-zA-Z0-9_\.]/_/g;
+    $metric =~ s/[^a-zA-Z0-9_\.-]/_/g;
 
     print "$metric $value $date\n";
 }
