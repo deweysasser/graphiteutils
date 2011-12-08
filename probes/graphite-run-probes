@@ -1,6 +1,7 @@
 #!/bin/bash
 
 dir=/var/lib/graphite/probes
+logproc=/var/lib/graphite/logs
 
 while [ -n "$*" ] ; do
   case $1 in 
@@ -29,3 +30,9 @@ for probe in $dir/graphite-probe*; do
 	$probe  -prefix $prefix -graphite $graphite
     fi
 done
+
+if [ -d $logproc ] ; then
+    for args in $logproc/*.glog; do
+	$logproc/graphite-log -graphite $graphite `cat $args`
+    done
+fi
