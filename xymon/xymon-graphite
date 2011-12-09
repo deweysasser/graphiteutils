@@ -166,6 +166,8 @@ sub report {
     
 #http://graphite/render?width=400&from=-20minutes&until=now&height=250&target=alias(color(lineWidth(dashed(threshold(1))%2C2)%2C%22yellow%22)%2C%22WARN%22)&uniq=0.0314605470321202&title=alias(color(lineWidth(dashed(threshold(1))%2C2)%2C%22yellow%22)%2C%22WARN%22)
 
+    my $baseURL = $url;
+
 
     if($status > 0 ) {
 	my $threshold = $warn->{series}->{value};
@@ -198,7 +200,7 @@ sub report {
     $url =~ s/,/%2C/g;
     $url =~ s/"/%22/g;
 
-    push(@content, "<img src=\"$url\"/>");
+    push(@content, "<img src=\"$url\"/> <p>Monitored URL <a href=\"$baseURL\">here</a></p>");
 
     my $color;
 
