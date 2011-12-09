@@ -59,6 +59,7 @@ sub main {
     &probe_load;
     &probe_disk;
     &probe_network;
+    &probe_vm;
     &probe_memory;
 
 
@@ -83,6 +84,27 @@ sub processFileOptions {
     close $options;
 
     &GetOptions(%Options);
+}
+
+sub probe_vm {
+    my $fd;
+
+    open($fd, "/proc/vmstat") || die("Failed to read /proc/vmstat: $!");
+
+    my %values;
+
+    while(<$fd>) {
+	chop;
+	my ($key, $value, $unit) = split(/[:\s]+/, $_);
+	$value *= 1024 if $unit eq "kB";
+
+	&write("vmstat.pages.in", $value) if $key eq "pgpgin";
+	&write("vmstat.pages.out", $value) if $key eq "pgpgout";
+	&write("vmstat.swap.in", $value) if $key eq "pswpin";
+	&write("vmstat.swap.out", $value) if $key eq "pswpout";
+    }
+
+    close $fd;
 }
 
 sub probe_memory {
