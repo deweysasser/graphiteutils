@@ -98,8 +98,10 @@ sub probe_vm {
 	my ($key, $value, $unit) = split(/[:\s]+/, $_);
 	$value *= 1024 if $unit eq "kB";
 
-	&write("vmstat.pages.in", $value) if $key eq "pgpgin";
-	&write("vmstat.pages.out", $value) if $key eq "pgpgout";
+# Don't realy need these -- it's just block in/out from IO as well as
+# swap so as far as I can tell it's replicated in disk.al stats
+#	&write("vmstat.pages.in", $value) if $key eq "pgpgin";
+#	&write("vmstat.pages.out", $value) if $key eq "pgpgout";
 	&write("vmstat.swap.in", $value) if $key eq "pswpin";
 	&write("vmstat.swap.out", $value) if $key eq "pswpout";
     }
