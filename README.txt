@@ -11,11 +11,8 @@ This package consists of 3 categories:
 
 These have can be used indepdently.
 
-Please report all bugs or suggestions on the GitHub project page at
-https://github.com/dmsasser/graphiteutils
-
-Patches will be accepted through GitHub or via email to
-dewey@deweysasser.com -- please do use Git to make our lives easier.
+See the project page http://deweysasser.com/software/graphiteutils for
+more details.
 
 Thanks,
 
