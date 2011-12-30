@@ -1,10 +1,60 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
-# purpose:  Monitor graphite data and trigger outcomes in xymon
+=head1 NAME
+
+B<xymon-graphite> -- Monitor graphite data and trigger outcomes in xymon
+
+=head1 SYNOPSIS
+
+B<xymon-graphite>  [-debug] [-noexec] [-man] [-help] [-noreport] [-f CONFIGFILE]
+
+=head1 DESCRIPTION
+
+This command should be run periodically to update Xymon column status
+from data collected from a Graphite server.
+
+The result of a run is the particlar Xymon column will be updated as
+appropriate.  The status message will include HTML which embeds a
+Graphite graph of the time for which this command was run.  
+
+Additionally, if the status will be yellow or red, the graph will be
+decorated with warning or error threshold lines and the reason for the
+status will be printed as text.
+
+=head1 OPTIONS
+
+=over
+
+=item -f|-config-file CONFIGFILE
+
+use the config file given rather than the default of
+/home/xymon/server/etc/graphite.cfg 
+
+=item -noreport
+
+Do not invoke the 'bb' command to send status
+
+=item -debug
+
+Turn on debugging output
+
+=item -man
+
+Show this page
+
+=item -help
+
+Show a brief summary of options
+
+=back
+
+=cut
 
 use strict;
-use vars qw (%Config);
+our %Config;
+
 use POSIX 'strftime';
+use Pod::Usage;
 use Getopt::Long;
 
 # this lives here because of file-read order in PERL
@@ -12,13 +62,19 @@ use Getopt::Long;
 
 $Config{file}="/home/xymon/server/etc/graphite.cfg";
 
-unless(&GetOptions(
-	    "debug" => \$Config{debug},
+unless (GetOptions(
+	    "debug" => \$Config{debug}, 
 	    "noreport" => \$Config{noreport},
 	    "f|config-file=s" => \$Config{file},
-       )) {
-    die("Failed processing options");
+	    "man" => \$Config{man},
+	    "help" => \$Config{help},
+	)) {
+    &usage;
+    exit 1; # unreachable
 }
+
+&help if $Config{help};
+&man if $Config{man};
 
 &main;
 
@@ -218,18 +274,12 @@ sub report {
 
     my $cmd = "bb localhost 'status $column $color $content'";
 
-    print $cmd;
+    print $cmd if $Config{noreport};
 
     return if $Config{noreport};
     return !system($cmd);
 }
 
-sub debug {
-    return unless $Config{debug};
-
-    print "@_\n";
-}
-    
 
 sub max {
     my $a = shift;
@@ -458,3 +508,137 @@ sub getSeries {
 
     return keys %{$self->{status}};
 }
+
+package main;
+
+sub debug {
+    return unless $Config{debug};
+
+    print STDERR "@_\n";
+}
+
+sub error {
+    &debug(@_);
+    print STDERR "@_\n";
+}
+
+sub run {
+  &debug(@_);
+  return !system(@_) unless $Config{noexec};
+}
+
+sub help {
+    pod2usage( -exitval => 0, -center => "graphiteutils", -verbose=>1);
+}
+
+sub man {
+    pod2usage( -exitval => 0, -center => "graphiteutils", -verbose=>2);
+}
+
+sub usage {
+    pod2usage( -exitstatus => 1);
+}
+
+=pod 
+
+=head1 EXAMPLES
+
+The most straight-forward way to run this command is to include it in
+the Xymon tasks.d directory, perhaps with the following definition:
+
+
+ [graphite]
+	ENVFILE /home/xymon/client/etc/xymonclient.cfg
+        NEEDS xymond
+        CMD /home/xymon/server/bin/xymon-graphite -f /home/xymon/server/etc/graphite.cfg
+        LOGFILE $XYMONSERVERLOGS/xymon-graphite.log
+        INTERVAL 5m
+
+A configuration file might look like this:
+
+ [packet loss]
+ column=foo.bar 
+ url=http://graphite.example.com/render?width=500&from=-4hours&until=now&height=400&target=system.graphite.ping.*.packet_loss.percent&target=alias%28color%28threshold%2810%29%2C%22yellow%22%29%2C%22Warning%22%29&title=Packet_Loss&hideLegend=false&uniq=0.16443394137846012&rawData=true 
+ warn=00 
+ error=20 
+
+ [ping time]
+ probetype=independent
+ columnregexp=ping\.([^\.]+)
+ columneval=foo.$1
+ url=http://graphite.example.com/render?width=500&from=-4hours&until=now&height=400&target=legendValue(system.graphite.ping.*.90percent.ms%2C%22avg%22)&title=90_perc_ping_time&uniq=0.8639914226792692
+ warn = 20
+ error = 30
+
+=head1 FILES
+
+The default configuration file is /home/xymon/server/etc/graphite.cfg
+
+A probe is defined by a configuration file containing Xymon tasks.cfg
+style section, followed by name=value pairs.  The names of the
+sections are not currently significant.
+
+All probes take names "error" and "warn" which are respectively the
+thresholds at which the column will be set to red and yellow.  Both of
+these are optional though if neither is set the probe will not be
+terribly useful.  Both values should be bare numbers without units to
+which the graphite data will be compared.
+
+All probes also take a "url" column which is designed to be pasted in
+from a browser monitoring page.  The URL does *NOT* need to be of the
+appropriate time scale -- the time scale will be overridden by the
+probe.
+
+There are two different types of xymon probes defined in the
+configuration file: static columns names and "independent" column
+names.
+
+=item Statically named probes
+
+Static column names are just that: a probe where the column name is
+defined exactly in the configuration file.  If any value in the
+graphite data exceeds a threshold the status will be reported for the
+column given in the probe definition.
+
+Names required for staticly named probes are:  url and column.  
+
+=item "Indepdent" probes
+
+"Indepentant" probes will consider each graphite data series
+independently against the thresholds and will build a column name from
+a PERL regexp based on the data series name.
+
+Names required for "indepdent" probe types are: probetype=indepdent,
+url, columnregexp, and columneval
+
+"columnregexp" should be a PERL regular expresion which will be
+matched against the data series name.  "columneval" will then be
+evaluated in the context of the regular expression match to generate
+the column name, which will then be passed verbatim to Xymon.
+
+=back
+
+=head1 ENVIRONMENT
+
+=item BB command
+
+This program assumes 'bb' is reachable on the path
+
+=item curl command
+
+This program uses the 'curl' command to retrieve the graphite data and
+assumes that the command is reachable on the path.
+
+=back
+
+=head1 BUGS AND CAVEATS
+
+This command will take the times from "now" to the appropriate time in the past and will retrieve graphite data for that time period.  The graphs displayed on the Xymon status pages are live links for the same time period.  If graphite retroactively adds or changes data, that data will display on the status page when viewed but may *not* have been included in the comparison.
+
+This is most often a problem if you have graphite probes that suffer a
+reporting lag.
+
+=head1 AUTHOR
+
+Dewey Sasser <dewey@sasser.com>
+=cut
