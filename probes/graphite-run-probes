@@ -27,7 +27,11 @@ test -n "$sleep" && sleep $sleep
 
 for probe in $dir/graphite-probe*; do
     if [ -x $probe ] ; then
-	$probe  -prefix $prefix -graphite $graphite
+	if [ -f $probe.args ] ;then
+	    $probe  -prefix $prefix -graphite $graphite `cat $probe.args`
+	else
+	    $probe  -prefix $prefix -graphite $graphite
+	fi
     fi
 done
 
