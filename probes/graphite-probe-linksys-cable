@@ -1,6 +1,8 @@
 #!/usr/bin/perl
 
-# purpose:  Graphite probe to measure packet loss.  Relies on the ping command
+# TODO:  remove dependency on curl.  Maybe use wget instead?
+
+# purpose:  Graphite probe report statistics from Linksys cable modem
 use strict;
 use Getopt::Long;
 use vars qw (%Config);
@@ -10,6 +12,7 @@ use Sys::Hostname;
 
 our @Fields=("SNR", "Downstream Power", "Symbol Rate", "Provisioned Rate", "Upstream Power");
 
+$Config{date}=time;
 $Config{count}=60;
 
 unless(GetOptions(
@@ -48,7 +51,7 @@ sub main {
 
     while(<$curl>) {
 	chop;
-	&debug("[$_]");
+#	&debug("[$_]");
 	if(/>\s*(Downstream|Upstream) Channel/) {
 	    $section = $1 ;
 	    &debug("Found section marker for $section");
@@ -57,8 +60,8 @@ sub main {
 	    $current = $1;
 	    &debug("Found field $current");
 	}
-	if($current && /td.*>(&nbsp;)?(-?[\d\.]+)/) {
-	    $fields{$section}{$current}=$2;
+	if($current && /td.*>(&nbsp;)?(-?[\d\.]+)\s*([^<]+)/) {
+	    $fields{$section}{"$current.$3"}=$2;
 	    $current = undef;
 	}
     }
