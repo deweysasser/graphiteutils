@@ -3,6 +3,9 @@
 # purpose: analyze kernel debugging output to determine which VM is
 #  doing the IO
 
+# TODO:
+#  * look up PAGESIZE and change pages to bytes
+
 use Time::Local;
 use Getopt::Long; 
 use strict;
@@ -91,8 +94,8 @@ sub cpu {
 	&write("vmware.vmx.cpu.$name.user.tick_count", $utime/$clocks);
 	&write("vmware.vmx.cpu.$name.system.tick_count", $stime/$clocks);
 	&write("vmware.vmx.cpu.$name.total_time.tick_count", ($utime + $stime + $cutime + $cstime)/$clocks);
-	&write("vmware.vmx.cpu.$name.vmem.pages", $vsize);
-	&write("vmware.vmx.cpu.$name.vmem.fault.pages", $cmajflt);
+	&write("vmware.vmx.memory.$name.pages", $vsize);
+	&write("vmware.vmx.memory.$name.fault.pages", $cmajflt);
     }
 
     close $stat;
@@ -127,9 +130,9 @@ sub mem {
 	chop;
 	my ($total, $resident, $share, $text, $data, $lib, $dirty) = split(/\s+/);
 
-	&write("vmware.vmx.cpu.$name.memory.total.pages", $total);
-	&write("vmware.vmx.cpu.$name.memory.resident.pages", $resident);
-	&write("vmware.vmx.cpu.$name.memory.shared.pages", $share);
+	&write("vmware.vmx.memory.$name.total.pages", $total);
+	&write("vmware.vmx.memory.$name.resident.pages", $resident);
+	&write("vmware.vmx.memory.$name.shared.pages", $share);
     }
 
     close $stat;
