@@ -63,6 +63,7 @@ sub main {
 
 	&io($name, $pid);
 	&cpu($name, $pid);
+	&mem($name, $pid);
 
     }
 
@@ -85,11 +86,13 @@ sub cpu {
     print "# clocks are $clocks\n";
     while(<$stat>) {
 	chop;
-	my ($pidagain, $exe, $state, $ppid, $pgrp, $session, $tty_nr, $tpgid, $flags, $minflt, $cminflt, $majflt, $cmajflt, $utime, $stime, $cutime, $cstime, $pri) = split(/\s+/);
+	my ($pidagain, $exe, $state, $ppid, $pgrp, $session, $tty_nr, $tpgid, $flags, $minflt, $cminflt, $majflt, $cmajflt, $utime, $stime, $cutime, $cstime, $pri, $nice, $itrealvalue, $starttime, $vsize, $rss, $rlim, $startcode, $endcode) = split(/\s+/);
 
 	&write("vmware.vmx.cpu.$name.user.tick_count", $utime/$clocks);
 	&write("vmware.vmx.cpu.$name.system.tick_count", $stime/$clocks);
 	&write("vmware.vmx.cpu.$name.total_time.tick_count", ($utime + $stime + $cutime + $cstime)/$clocks);
+	&write("vmware.vmx.cpu.$name.vmem.pages", $vsize);
+	&write("vmware.vmx.cpu.$name.vmem.fault.pages", $cmajflt);
     }
 
     close $stat;
@@ -110,6 +113,26 @@ sub io {
     }
 
     close $io;
+
+}
+
+sub mem {
+    my $name = shift;
+    my $pid = shift;
+
+    return unless -r "/proc/$pid/statm";
+    open(my $stat, "/proc/$pid/statm") || die("Failed to read statm for $pid: $!");
+
+    while(<$stat>) {
+	chop;
+	my ($total, $resident, $share, $text, $data, $lib, $dirty) = split(/\s+/);
+
+	&write("vmware.vmx.cpu.$name.memory.total.pages", $total);
+	&write("vmware.vmx.cpu.$name.memory.resident.pages", $resident);
+	&write("vmware.vmx.cpu.$name.memory.shared.pages", $share);
+    }
+
+    close $stat;
 
 }
 
