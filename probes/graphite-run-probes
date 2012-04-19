@@ -6,7 +6,7 @@ logproc=/var/lib/graphite/logs
 while [ -n "$*" ] ; do
   case $1 in 
       -prefix) prefix="$2"; shift;;
-      -grahpite) graphite="$2"; shift;;
+      -graphite) graphite="$2"; shift;;
       -sleep) sleep="$2"; shift;;
       -*) echo "Unknown option $1"; exit 1;;
       *) echxo "Unknown argument $1"; exit 2;;
