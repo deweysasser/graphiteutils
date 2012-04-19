@@ -1,0 +1,152 @@
+#!/usr/bin/perl
+
+# purpose:  log NFS stats to the global graphite
+
+use POSIX 'strftime';
+use strict;
+use Getopt::Long;
+use Sys::Hostname;
+
+use vars '%Config', '@NFSFields', '%FieldWanted';
+
+$Config{stats}="/proc/net/rpc/nfs";
+$Config{nfs2}=0;
+$Config{nfs3}=1;
+$Config{nfs4}=0;
+
+@NFSFields = (
+"null",
+"getattr",
+"setattr",
+"lookup",
+"access",
+"readlink",
+"read",
+"write",
+"create",
+"mkdir",
+"symlink",
+"mknod",
+"remove",
+"rmdir",
+"rename",
+"link",
+"readdir",
+"readdirplus",
+"fsstat",
+"fsinfo",
+"pathconf",
+"commit",
+    );
+
+$FieldWanted{read}=1;
+$FieldWanted{write}=1;
+$FieldWanted{access}=1;
+$FieldWanted{readdir}=1;
+$FieldWanted{readdirplus}=1;
+
+unless(&GetOptions(
+	    "graphite" => \$Config{graphite},
+	    "prefix=s" => \$Config{prefix},
+	    "nfs2" => \$Config{nfs2},
+	    "nfs3" => \$Config{nfs3},
+	    "nfs4" => \$Config{nfs4},
+       )) {
+    die("Bad options");
+}
+
+unless(defined $Config{prefix}) {
+    $Config{prefix} = "system." . hostname ;
+}
+
+&main;
+
+sub main {
+    my $stats={};
+
+    open(my $input, $Config{stats}) || die("Failed to read $Config{stats}: $!");
+
+    while(<$input>) {
+	chop;
+#	&debug("read line [$_]");
+	if(/^rpc/) {
+	    &handleRpc($stats, $_);
+	    next;
+	}
+	if(/^proc/) {
+	    &handleProc($stats,  $_);
+	    next;
+	}
+    }
+
+    close $input;
+
+    my $now = strftime("%s", localtime());
+
+    my $graphite;
+
+    if($Config{graphite}) {
+	my ($host, $port) = split(/:/, $Config{graphite});
+	$port = 2003 unless $port;
+	open($graphite, "| nc -q 2 $host $port") || die("Failed to write to netcat $host:$port : $!");
+	select $graphite;
+    }
+
+    foreach my $key (keys %$stats) {
+	print "$Config{prefix}.nfs.$key ", $stats->{$key}, " $now\n";
+    }
+
+    if($graphite) {
+	select STDOUT;
+	close $graphite;
+    }
+}
+
+sub debug { 
+    print "@_\n";
+}
+
+sub handleRpc {
+    my $stats=shift;
+    my $line = shift;
+
+    my ($discard, $numcalls, $retrans, $refresh) = split(/\s+/, $line);
+
+
+    $stats->{"rpc.calls"}=$numcalls;
+}
+
+sub handleProc {
+    my $stats=shift;
+    my $line = shift;
+
+    my ($title, $discard, @fields) = split(/\s+/, $line);
+
+    $title =~ /proc([\d])/;
+
+    my $version = $1;
+
+    return unless $Config{"nfs$version"};
+
+    for(my $i=0; $i<$#fields; $i++) {
+	my $field = $NFSFields[$i];
+	next unless $FieldWanted{$field};
+
+	$stats->{"v$version.$field"} = $fields[$i];
+    }
+}
+
+
+sub trim {
+    my $s = shift;
+
+    $s =~ s/^\s+//;
+    $s =~ s/\s+$//;
+
+    return $s;
+}
+    
+
+    
+
+
