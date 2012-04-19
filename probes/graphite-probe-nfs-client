@@ -46,7 +46,7 @@ $FieldWanted{readdir}=1;
 $FieldWanted{readdirplus}=1;
 
 unless(&GetOptions(
-	    "graphite" => \$Config{graphite},
+	    "graphite=s" => \$Config{graphite},
 	    "prefix=s" => \$Config{prefix},
 	    "nfs2" => \$Config{nfs2},
 	    "nfs3" => \$Config{nfs3},

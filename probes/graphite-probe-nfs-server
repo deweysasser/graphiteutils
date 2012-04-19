@@ -12,7 +12,7 @@ use vars '%Config';
 $Config{stats}="/proc/net/rpc/nfsd";
 
 unless(&GetOptions(
-		   "graphite" => \$Config{graphite},
+		   "graphite=s" => \$Config{graphite},
 		   "prefix=s" => \$Config{prefix},
 		   )) {
     
