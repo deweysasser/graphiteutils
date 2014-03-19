@@ -1,0 +1,119 @@
+#!/usr/bin/perl
+
+# Purpose:  Read all the SAMBA logs.  Send statuses to Graphite
+
+use strict;
+use POSIX 'strftime';
+use Sys::Hostname;
+use Getopt::Long;
+use File::Basename;
+use File::Path;
+use IO::Socket;
+
+our %Config;
+
+$Config{"thishost"} = hostname;
+$Config{"now"} = strftime("%s", localtime);
+$Config{"statedir"} = "/var/lib/graphite-samba-log/state";
+#$Config{"graphite"} = "graphite:2003";
+
+
+unless(GetOptions(
+	   "debug" => \$Config{debug},
+	   "prefix=s" => \$Config{prefix},
+	   "graphite-server=s" => \$Config{graphite},
+       )) {
+    print STDERR "Invalid usage\n";
+    exit 1;
+}
+
+
+&main;
+
+sub main {
+
+    mkpath($Config{"statedir"}) unless -d $Config{"statedir"};
+
+    my $graphite;
+
+    if($Config{graphite}) {
+	my ($host, $port) = split(/:/, $Config{graphite});
+	$port = 2003 unless $port;
+
+
+	$graphite = new IO::Socket::INET (
+	    PeerAddr => $host,
+	    PeerPort => $port,
+	    Proto => 'tcp'
+	    );
+
+	die("Failed to open a socket to $host:$port $!") unless $graphite;
+
+	debug("Opened socket $graphite to $host:$port");
+	
+	select $graphite;
+    }
+
+    foreach my $file (@ARGV) {
+	next if $file =~ /\.offset$/;
+	$file =~ /log.([^\/]*)$/;
+	&debug("Reporting on $file");
+	&handleLog($1, $file);
+    }
+
+    select STDOUT;
+
+    close($graphite) if $graphite;
+}
+
+sub handleLog {
+    my $host = shift;
+    my $file = shift;
+    my $statedir = $Config{"statedir"};
+
+    die("Need host from $host") unless $host;
+    my $key = &createKey($host);
+
+    my $us = $Config{"thishost"};
+
+    my %count;
+
+    open(my $fh, "logtail2 $file $statedir/$host |") || die("Failed to read $file: $!");
+
+    while(<$fh>) {
+	$count{$1}++ if /(NT_STATUS_\w+)/;
+    }
+
+    close $fh;
+
+    my $now = $Config{"now"};
+
+    foreach my $status (sort keys %count) {
+	my $count = $count{$status};
+	print "$key.$status $count $now\n";
+    }
+
+}
+
+sub createKey {
+    my $host = shift;
+    my $prefix = "shares.samba";
+    my $self = &normalizeHost($Config{"thishost"});
+    my $host = &normalizeHost($host);
+
+    return "$prefix.$self.$host";
+}
+
+sub normalizeHost {
+    my $host = shift;
+
+    $host =~ s/[\.\s]/_/g;
+
+    return $host;
+}
+
+
+sub debug {
+    return unless $Config{debug};
+    print STDERR join(" ", @_) . "\n";
+}
