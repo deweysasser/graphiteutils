@@ -60,6 +60,7 @@ sub main {
 
     foreach my $file (@ARGV) {
 	next if $file =~ /\.offset$/;
+	next if $file =~ /\.old$/;
 	$file =~ /log.([^\/]*)$/;
 	&debug("Reporting on $file");
 	&handleLog($1, $file);
