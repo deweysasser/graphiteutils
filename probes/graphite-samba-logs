@@ -12,7 +12,6 @@ use IO::Socket;
 
 our %Config;
 
-$Config{"thishost"} = hostname;
 $Config{"now"} = strftime("%s", localtime);
 $Config{"statedir"} = "/var/lib/graphite-samba-log/state";
 #$Config{"graphite"} = "graphite:2003";
@@ -22,11 +21,15 @@ unless(GetOptions(
 	   "debug" => \$Config{debug},
 	   "prefix=s" => \$Config{prefix},
 	   "state-dir=s" => \$Config{statedir},
+	   "host=s" => \$Config{thishost},
 	   "graphite-server=s" => \$Config{graphite},
        )) {
     print STDERR "Invalid usage\n";
     exit 1;
 }
+
+
+$Config{"thishost"} = hostname unless $Config{"thishost"};
 
 
 &main;
