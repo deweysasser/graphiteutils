@@ -21,6 +21,7 @@ $Config{"statedir"} = "/var/lib/graphite-samba-log/state";
 unless(GetOptions(
 	   "debug" => \$Config{debug},
 	   "prefix=s" => \$Config{prefix},
+	   "state-dir=s" => \$Config{statedir},
 	   "graphite-server=s" => \$Config{graphite},
        )) {
     print STDERR "Invalid usage\n";
