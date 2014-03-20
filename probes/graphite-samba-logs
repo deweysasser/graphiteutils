@@ -38,6 +38,8 @@ sub main {
 
     mkpath($Config{"statedir"}) unless -d $Config{"statedir"};
 
+    &debug("Time is", strftime("%H:%M:%S", localtime));
+
     my $graphite;
 
     if($Config{graphite}) {
@@ -62,7 +64,7 @@ sub main {
 	next if $file =~ /\.offset$/;
 	next if $file =~ /\.old$/;
 	$file =~ /log.([^\/]*)$/;
-	&debug("Reporting on $file");
+#	&debug("Reporting on $file");
 	&handleLog($1, $file);
     }
 
