@@ -1,3 +1,10 @@
+ARCHIVED
+========
+
+This project is no longer maintained.  If someone would like to adopt it I'll be happy to transfer it.
+
+---
+
 This package contains tools designed to work with the Graphite data
 collection system.  See http://graphite.wikidot.com/ for details.
 
